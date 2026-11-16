@@ -1,13 +1,15 @@
 -- B3 Health Store starter schema
--- Run this in Supabase SQL Editor. Create an Auth user for the first Super Admin,
--- then set that user's profile role to 'super_admin'.
+-- Safe to run on a new Supabase project and safe to re-run: tables, the bucket
+-- and every policy are created idempotently.
+-- Run this in the Supabase SQL Editor. Create an Auth user for the first Super
+-- Admin, then set that user's profile role to 'super_admin' (see README).
 
 create extension if not exists pgcrypto;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text,
-  role text not null default 'staff' check (role in ('super_admin')),
+  role text not null default 'staff' check (role in ('staff', 'super_admin')),
   created_at timestamptz not null default now()
 );
 
@@ -77,35 +79,42 @@ alter table public.product_batches enable row level security;
 alter table public.stock_movements enable row level security;
 
 -- Public visitors can only read products explicitly published to the homepage.
+drop policy if exists "Public can view published products" on public.products;
 create policy "Public can view published products"
 on public.products for select
 using (is_visible_on_homepage = true);
 
 -- Super Admin policies. Do not expose the service-role key in the browser.
+drop policy if exists "Super admin full access to products" on public.products;
 create policy "Super admin full access to products"
 on public.products for all
 using (public.is_super_admin())
 with check (public.is_super_admin());
 
+drop policy if exists "Super admin manage categories" on public.categories;
 create policy "Super admin manage categories"
 on public.categories for all
 using (public.is_super_admin())
 with check (public.is_super_admin());
 
+drop policy if exists "Super admin manage batches" on public.product_batches;
 create policy "Super admin manage batches"
 on public.product_batches for all
 using (public.is_super_admin())
 with check (public.is_super_admin());
 
+drop policy if exists "Super admin manage stock movements" on public.stock_movements;
 create policy "Super admin manage stock movements"
 on public.stock_movements for all
 using (public.is_super_admin())
 with check (public.is_super_admin());
 
+drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
 on public.profiles for select
 using (id = auth.uid());
 
+drop policy if exists "Super admin can manage profiles" on public.profiles;
 create policy "Super admin can manage profiles"
 on public.profiles for all
 using (public.is_super_admin())
@@ -119,19 +128,23 @@ insert into storage.buckets (id, name, public)
 values ('product-images', 'product-images', true)
 on conflict (id) do nothing;
 
+drop policy if exists "Public can view product images" on storage.objects;
 create policy "Public can view product images"
 on storage.objects for select
 using (bucket_id = 'product-images');
 
+drop policy if exists "Super admin can upload product images" on storage.objects;
 create policy "Super admin can upload product images"
 on storage.objects for insert
 with check (bucket_id = 'product-images' and public.is_super_admin());
 
+drop policy if exists "Super admin can update product images" on storage.objects;
 create policy "Super admin can update product images"
 on storage.objects for update
 using (bucket_id = 'product-images' and public.is_super_admin())
 with check (bucket_id = 'product-images' and public.is_super_admin());
 
+drop policy if exists "Super admin can delete product images" on storage.objects;
 create policy "Super admin can delete product images"
 on storage.objects for delete
 using (bucket_id = 'product-images' and public.is_super_admin());
