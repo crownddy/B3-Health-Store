@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 type Product = {
   id: string;
@@ -42,10 +42,11 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     async function loadProducts() {
-      if (!supabase) {
+      if (!isSupabaseConfigured) {
         setLoading(false);
         return;
       }
+      const supabase = createClient();
       const { data, error } = await supabase
         .from("products")
         .select("id,name,description,category,image_url,selling_price,quantity,shelf_number,is_featured")
