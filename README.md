@@ -46,6 +46,24 @@ If Supabase is not configured, the homepage uses clearly-labelled sample/demo pr
 
 5. Add the project URL and publishable/anon key to `.env.local` and Vercel environment variables.
 
+## Troubleshooting: "Invalid email address or password"
+
+That message is shown for *any* sign-in failure, so it does not tell you whether
+the password is wrong. Work through the causes in order:
+
+1. **Is `NEXT_PUBLIC_SUPABASE_URL` the plain project URL?** It must be
+   `https://<project-ref>.supabase.co`, with no `/rest/v1` or `/auth/v1` suffix.
+   A suffix makes supabase-js request `/rest/v1/auth/v1/token`, which returns 404
+   and is reported to the user as a bad password. After changing the variable in
+   Vercel, **redeploy** — `NEXT_PUBLIC_*` values are baked in at build time.
+2. **Does the account have a `profiles` row with `role = 'super_admin'`?**
+   Without a profile, sign-in succeeds but admin access is refused.
+3. **Is the email confirmed?** An unconfirmed account cannot use password sign-in.
+
+A trailing service path in the URL is corrected automatically at runtime, and
+the admin settings screen shows a warning when it had to be corrected. Fix the
+variable in Vercel as well, so the configured value and the behaviour match.
+
 ## Important security notes
 
 - Never put the Supabase `service_role` secret in browser code or a `NEXT_PUBLIC_` variable.

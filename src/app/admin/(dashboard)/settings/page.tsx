@@ -1,6 +1,6 @@
 import { requireSuperAdmin } from "@/lib/auth";
 import { SectionCard, StatusPill } from "@/components/admin/ui";
-import { isSupabaseConfigured } from "@/lib/supabase/server";
+import { isSupabaseConfigured, supabaseUrl, supabaseUrlWasNormalized } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,7 @@ export default async function AdminSettingsPage() {
   const identity = await requireSuperAdmin();
 
   // Only booleans are surfaced. Secret values are never rendered or read here.
-  const supabaseUrlSet = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const supabaseUrlSet = Boolean(supabaseUrl);
   const anonKeySet = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
   return (
@@ -20,6 +20,15 @@ export default async function AdminSettingsPage() {
           <p className="admin-page-sub">Store configuration and connection status.</p>
         </div>
       </div>
+
+      {supabaseUrlWasNormalized && (
+        <p className="admin-alert admin-alert-warn" role="status">
+          <code>NEXT_PUBLIC_SUPABASE_URL</code> included a service path (for example{" "}
+          <code>/rest/v1</code>). It is being corrected automatically, but set it to the plain
+          project URL (<code>https://&lt;project-ref&gt;.supabase.co</code>) in Vercel to avoid
+          confusion.
+        </p>
+      )}
 
       <SectionCard title="Supabase connection" description="Client-side configuration status.">
         <div className="admin-table-wrap">
