@@ -31,8 +31,19 @@ export default function LoginForm({ notProvisioned }: { notProvisioned: boolean 
       });
 
       if (signInError) {
-        // Deliberately generic: never reveal whether an account exists.
-        setError("Invalid email address or password.");
+        // A wrong password and a broken/unreachable auth endpoint must not look
+        // the same: the latter is a configuration fault, not a bad credential,
+        // and telling the user their password is wrong sends them down the wrong
+        // path (this is exactly what a doubled /rest/v1 path used to do).
+        const status = signInError.status ?? 0;
+        if (status === 0 || status >= 500 || status === 404) {
+          setError(
+            "The authentication service could not be reached. This is a configuration problem — please contact your Super Admin."
+          );
+        } else {
+          // Deliberately generic: never reveal whether an account exists.
+          setError("Invalid email address or password.");
+        }
         setSubmitting(false);
         return;
       }
