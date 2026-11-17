@@ -55,7 +55,7 @@ create index if not exists products_status_idx
 
 create table if not exists public.product_batches (
   id uuid primary key default gen_random_uuid(),
-  product_id uuid not null references public.products(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete restrict,
   batch_number text,
   quantity_received integer not null default 0 check (quantity_received >= 0),
   quantity_remaining integer not null default 0 check (quantity_remaining >= 0),

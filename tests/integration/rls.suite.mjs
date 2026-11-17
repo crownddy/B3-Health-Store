@@ -115,6 +115,28 @@ psql(`insert into public.stock_movements (product_id, movement_type, quantity, n
 await rest(`products?id=eq.${vitaminC}`, { token: superToken, method: "DELETE" });
 check("delete blocked while stock history exists", 1, psql(`select count(*) from public.products where id='${vitaminC}'`));
 
+// A batch is history too. The foreign key must be ON DELETE RESTRICT, so a
+// product that only has a batch (no stock movement) still cannot be deleted,
+// and the batch row must survive the attempt.
+const batchProduct = await (
+  await rest("products", {
+    token: superToken,
+    method: "POST",
+    prefer: "return=representation",
+    body: { name: "Batch History", sku: "BATCH-RLS", selling_price: 1 }
+  })
+).json();
+const batchProductId = Array.isArray(batchProduct) ? batchProduct[0]?.id : "";
+psql(
+  `insert into public.product_batches (product_id, batch_number, quantity_received, quantity_remaining, expiration_date)
+   values ('${batchProductId}', 'RLS-BATCH', 5, 5, '2027-01-01')`
+);
+await rest(`products?id=eq.${batchProductId}`, { token: superToken, method: "DELETE" });
+check("delete blocked while batch history exists", 1, psql(`select count(*) from public.products where id='${batchProductId}'`));
+check("batch history intact after blocked delete", 1, psql(`select count(*) from public.product_batches where product_id='${batchProductId}'`));
+psql(`delete from public.product_batches where product_id='${batchProductId}'`);
+await rest(`products?id=eq.${batchProductId}`, { token: superToken, method: "DELETE" });
+
 await rest(`products?id=eq.${vitaminC}`, {
   token: superToken,
   method: "PATCH",
