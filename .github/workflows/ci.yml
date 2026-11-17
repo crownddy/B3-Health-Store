@@ -1,0 +1,91 @@
+name: CI
+
+# Verifies the product-management work end to end: unit tests, RLS/authorization
+# tests, type-check, production build and the Playwright browser E2E suite, all
+# against a throwaway local Supabase stack started by
+# tests/integration/scripts/setup.mjs.
+#
+# The integration stack generates its own keys at runtime into a gitignored
+# .local-test/ directory. This workflow uses no repository secrets and never
+# touches a hosted Supabase project or Vercel deployment: scripts/env.mjs and the
+# gateway refuse any target that is not loopback.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feat/product-management]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Product management + integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Start the local Supabase integration stack
+        run: npm run test:integration:setup
+
+      # NEXT_PUBLIC_* values are inlined into the client bundle at build time, so
+      # the build must see the generated local values. These are public (the local
+      # anon key), never the service key, and only ever point at 127.0.0.1.
+      - name: Export generated local public env for the build
+        run: |
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(grep -m1 '^LOCAL_SUPABASE_URL=' .local-test/keys.env | cut -d= -f2-)"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep -m1 '^LOCAL_ANON_KEY=' .local-test/keys.env | cut -d= -f2-)"
+          } >> "$GITHUB_ENV"
+
+      - name: Run RLS / authorization suite
+        run: npm run test:integration:rls
+
+      - name: Build the app
+        run: npm run build
+
+      - name: Run browser E2E suite
+        run: npm run test:integration:e2e
+
+      - name: Show container status on failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          if [ -f .local-test/keys.env ]; then
+            docker compose --env-file .local-test/keys.env -f tests/integration/docker-compose.yml ps
+            docker compose --env-file .local-test/keys.env -f tests/integration/docker-compose.yml logs --tail=100
+          fi
+
+      - name: Stop and clean up the local stack
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f .local-test/keys.env ]; then
+            npm run test:integration:down
+          fi
