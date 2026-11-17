@@ -1,4 +1,10 @@
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import type { ProductBatchSummary, ProductRecord } from "@/lib/products/types";
+
+/** Columns loaded for the admin catalogue. */
+const PRODUCT_COLUMNS =
+  "id,name,description,category,sku,barcode,image_url,purchase_price,selling_price,quantity,minimum_stock,shelf_number,status,is_visible_on_homepage,is_featured,created_at,updated_at";
+
 
 export type DashboardMetrics = {
   totalProducts: number;
@@ -161,18 +167,62 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   };
 }
 
-export async function getProducts(): Promise<ProductRow[]> {
+export async function getProducts(): Promise<ProductRecord[]> {
   if (!isSupabaseConfigured) return [];
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("products")
-    .select(
-      "id,name,category,sku,selling_price,purchase_price,quantity,minimum_stock,shelf_number,is_visible_on_homepage,is_featured,created_at"
-    )
+    .select(PRODUCT_COLUMNS)
     .order("created_at", { ascending: false });
   if (error) throw new Error(`Unable to load products: ${error.message}`);
-  return (data ?? []) as ProductRow[];
+  return (data ?? []) as unknown as ProductRecord[];
 }
+
+export async function getProduct(id: string): Promise<ProductRecord | null> {
+  if (!isSupabaseConfigured) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load product: ${error.message}`);
+  return (data as unknown as ProductRecord) ?? null;
+}
+
+export async function getProductBatches(productId: string): Promise<ProductBatchSummary[]> {
+  if (!isSupabaseConfigured) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_batches")
+    .select("id,batch_number,expiration_date,quantity_remaining")
+    .eq("product_id", productId)
+    .order("expiration_date", { ascending: true, nullsFirst: false });
+  if (error) throw new Error(`Unable to load batches: ${error.message}`);
+  return (data ?? []) as ProductBatchSummary[];
+}
+
+/** Counts of the historical records that block a permanent delete. */
+export async function getProductReferenceCounts(
+  productId: string
+): Promise<{ stockMovements: number; batches: number }> {
+  if (!isSupabaseConfigured) return { stockMovements: 0, batches: 0 };
+  const supabase = await createClient();
+  const [movements, batches] = await Promise.all([
+    supabase
+      .from("stock_movements")
+      .select("id", { count: "exact", head: true })
+      .eq("product_id", productId),
+    supabase
+      .from("product_batches")
+      .select("id", { count: "exact", head: true })
+      .eq("product_id", productId)
+  ]);
+  if (movements.error) throw new Error(`Unable to check movements: ${movements.error.message}`);
+  if (batches.error) throw new Error(`Unable to check batches: ${batches.error.message}`);
+  return { stockMovements: movements.count ?? 0, batches: batches.count ?? 0 };
+}
+
 
 export async function getCategories(): Promise<{ id: string; name: string }[]> {
   if (!isSupabaseConfigured) return [];
