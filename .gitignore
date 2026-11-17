@@ -1,8 +1,11 @@
 node_modules
 .next
 out
-.env
-.env.local
+# Ignore every environment file, but keep the committed template.
+.env*
+!.env.example
+# Local integration test keys (generated, never committed).
+.local-test
 .vercel
 .DS_Store
 *.tsbuildinfo

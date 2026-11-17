@@ -7,7 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"tests/**/*.test.ts\""
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"tests/**/*.test.ts\"",
+    "test:integration:keys": "node tests/integration/scripts/generate-keys.mjs",
+    "test:integration:setup": "node tests/integration/scripts/setup.mjs",
+    "test:integration:up": "node tests/integration/scripts/stack.mjs up",
+    "test:integration:down": "node tests/integration/scripts/stack.mjs down",
+    "test:integration:rls": "node tests/integration/rls.suite.mjs",
+    "test:integration:e2e": "node tests/integration/scripts/run-e2e.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -22,6 +28,7 @@
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.5.0",
+    "playwright": "1.65.0",
     "typescript": "^5.9.0"
   }
 }

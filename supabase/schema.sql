@@ -25,21 +25,37 @@ create table if not exists public.products (
   description text,
   category text,
   sku text unique,
+  barcode text,
   image_url text,
   purchase_price numeric(12,2) not null default 0 check (purchase_price >= 0),
   selling_price numeric(12,2) not null default 0 check (selling_price >= 0),
   quantity integer not null default 0 check (quantity >= 0),
   minimum_stock integer not null default 0 check (minimum_stock >= 0),
   shelf_number text,
+  status text not null default 'active' check (status in ('active', 'archived')),
   is_visible_on_homepage boolean not null default false,
   is_featured boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+-- Bring an existing project up to date. Additive and idempotent.
+alter table public.products
+  add column if not exists barcode text;
+alter table public.products
+  add column if not exists status text not null default 'active'
+  check (status in ('active', 'archived'));
+
+create unique index if not exists products_barcode_key
+  on public.products (barcode)
+  where barcode is not null;
+create index if not exists products_status_idx
+  on public.products (status);
+
+
 create table if not exists public.product_batches (
   id uuid primary key default gen_random_uuid(),
-  product_id uuid not null references public.products(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete restrict,
   batch_number text,
   quantity_received integer not null default 0 check (quantity_received >= 0),
   quantity_remaining integer not null default 0 check (quantity_remaining >= 0),
@@ -79,10 +95,11 @@ alter table public.product_batches enable row level security;
 alter table public.stock_movements enable row level security;
 
 -- Public visitors can only read products explicitly published to the homepage.
+-- Archived products are never public, even if the homepage flag is left on.
 drop policy if exists "Public can view published products" on public.products;
 create policy "Public can view published products"
 on public.products for select
-using (is_visible_on_homepage = true);
+using (is_visible_on_homepage = true and status = 'active');
 
 -- Super Admin policies. Do not expose the service-role key in the browser.
 drop policy if exists "Super admin full access to products" on public.products;
