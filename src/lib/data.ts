@@ -1,5 +1,6 @@
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { ProductBatchSummary, ProductRecord } from "@/lib/products/types";
+import { EXPIRING_SOON_DAYS } from "@/lib/products/batches";
 
 /** Columns loaded for the admin catalogue. */
 const PRODUCT_COLUMNS =
@@ -148,7 +149,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const horizon = new Date(today.getTime() + 30 * 86_400_000);
+  const horizon = new Date(today.getTime() + EXPIRING_SOON_DAYS * 86_400_000);
 
   const expiring = batches.filter((batch) => {
     if (!batch.expiration_date) return false;
@@ -236,6 +237,55 @@ export async function getProductReferenceCounts(
   if (movements.error) throw new Error(`Unable to check movements: ${movements.error.message}`);
   if (batches.error) throw new Error(`Unable to check batches: ${batches.error.message}`);
   return { stockMovements: movements.count ?? 0, batches: batches.count ?? 0 };
+}
+
+/**
+ * Reference counts for several products at once, for the Inventory list.
+ *
+ * Only the ids on the current page are requested, so the check never loads the
+ * whole catalogue. Row Level Security still decides what the caller can count.
+ */
+export async function getProductReferenceCountsMany(
+  productIds: string[]
+): Promise<Map<string, { stockMovements: number; batches: number }>> {
+  const result = new Map<string, { stockMovements: number; batches: number }>();
+  if (!isSupabaseConfigured || productIds.length === 0) return result;
+
+  const supabase = await createClient();
+  const [movements, batches] = await Promise.all([
+    supabase.from("stock_movements").select("product_id").in("product_id", productIds),
+    supabase.from("product_batches").select("product_id").in("product_id", productIds)
+  ]);
+  if (movements.error) throw new Error(`Unable to check movements: ${movements.error.message}`);
+  if (batches.error) throw new Error(`Unable to check batches: ${batches.error.message}`);
+
+  for (const id of productIds) result.set(id, { stockMovements: 0, batches: 0 });
+  for (const row of (movements.data ?? []) as { product_id: string }[]) {
+    const entry = result.get(row.product_id);
+    if (entry) entry.stockMovements += 1;
+  }
+  for (const row of (batches.data ?? []) as { product_id: string }[]) {
+    const entry = result.get(row.product_id);
+    if (entry) entry.batches += 1;
+  }
+  return result;
+}
+
+/** Stock movement history for one product, newest first. */
+export async function getProductMovements(
+  productId: string,
+  limit = 50
+): Promise<MovementRow[]> {
+  if (!isSupabaseConfigured) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select("id,movement_type,quantity,note,created_at,products(name)")
+    .eq("product_id", productId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Unable to load stock movements: ${error.message}`);
+  return (data ?? []) as MovementRow[];
 }
 
 

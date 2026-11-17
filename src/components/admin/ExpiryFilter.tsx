@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
+import { EXPIRING_SOON_LABEL } from "@/lib/products/batches";
 
 /**
  * Filter for batch expiration status.
@@ -27,7 +28,7 @@ export default function ExpiryFilter({ basePath }: { basePath: string }) {
       <select value={current} onChange={(event) => apply(event.target.value)}>
         <option value="all">All batches</option>
         <option value="expired">Expired</option>
-        <option value="expiring_soon">Expiring soon (≤ 30 days)</option>
+        <option value="expiring_soon">Expiring soon (≤ {EXPIRING_SOON_LABEL})</option>
         <option value="valid">Valid</option>
         <option value="no_date">No expiry date</option>
       </select>

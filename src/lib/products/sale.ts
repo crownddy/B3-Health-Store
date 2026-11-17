@@ -8,6 +8,7 @@
  * supabase/migrations/20261117b_atomic_inventory_operations.sql); nothing here
  * touches stock.
  */
+import { pageCount as countPages, clampPage as clampToPage } from "./pagination.ts";
 
 /** Products shown per page on the Sold screen. */
 export const SALE_PAGE_SIZE = 8;
@@ -48,15 +49,15 @@ export function validateSaleQuantity(raw: string, available: number): SaleValida
   return { ok: true, value };
 }
 
-/** Total number of pages for a result count; at least 1 so the pager is stable. */
+/**
+ * Total number of pages for a result count; at least 1 so the pager is stable.
+ * Kept as a thin wrapper so existing callers keep the Sold screen's page size.
+ */
 export function pageCount(total: number, pageSize: number = SALE_PAGE_SIZE): number {
-  if (pageSize <= 0) return 1;
-  return Math.max(1, Math.ceil(total / pageSize));
+  return countPages(total, pageSize);
 }
 
 /** Keeps a page number within range for the given total. */
 export function clampPage(page: number, total: number, pageSize: number = SALE_PAGE_SIZE): number {
-  const last = pageCount(total, pageSize);
-  if (!Number.isFinite(page)) return 0;
-  return Math.min(Math.max(0, Math.trunc(page)), last - 1);
+  return clampToPage(page, total, pageSize);
 }
