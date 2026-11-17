@@ -20,7 +20,7 @@ export default async function NewProductPage() {
           <p className="admin-eyebrow">CATALOGUE</p>
           <h1>Add product</h1>
           <p className="admin-page-sub">
-            New products start with zero stock. Add opening stock with Stock In afterwards.
+            Record the product, and optionally its opening stock as the first batch.
           </p>
         </div>
         <Link href="/admin/products" className="admin-link-quiet">

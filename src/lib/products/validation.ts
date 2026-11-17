@@ -1,4 +1,4 @@
-import type { ProductInput, ProductRecord } from "@/lib/products/types";
+import type { InitialStockInput, ProductInput, ProductRecord } from "@/lib/products/types";
 
 export type ValidationResult =
   | { ok: true; value: ProductInput }
@@ -10,7 +10,8 @@ const MAX = {
   barcode: 64,
   category: 80,
   description: 2000,
-  shelf: 40
+  shelf: 40,
+  batch: 80
 };
 
 function text(form: FormData, key: string): string {
@@ -126,4 +127,48 @@ export function validateProductInput(
 export function firstError(errors: Record<string, string>): string {
   const first = Object.values(errors)[0];
   return first ?? "Please correct the highlighted fields.";
+}
+
+export type InitialStockResult =
+  | { ok: true; value: InitialStockInput | null }
+  | { ok: false; errors: Record<string, string> };
+
+/**
+ * Validates the optional Initial Stock section of the Add Product form.
+ *
+ * Returns `null` when no initial quantity was entered, so the product is
+ * created without a batch. A quantity requires a whole number greater than
+ * zero; the batch number stays optional and is generated later if omitted.
+ */
+export function validateInitialStock(form: FormData): InitialStockResult {
+  const errors: Record<string, string> = {};
+  const rawQuantity = text(form, "initial_quantity");
+
+  if (rawQuantity === "" || Number(rawQuantity) === 0) {
+    return { ok: true, value: null };
+  }
+
+  const quantity = wholeNumber(rawQuantity, "Initial quantity", errors, "initial_quantity");
+  if (quantity <= 0 && !errors.initial_quantity) {
+    errors.initial_quantity = "Initial quantity must be a whole number greater than zero.";
+  }
+
+  const expirationRaw = text(form, "initial_expiration_date");
+  let expiration: string | null = null;
+  if (expirationRaw) {
+    const parsed = new Date(expirationRaw);
+    if (Number.isNaN(parsed.getTime())) {
+      errors.initial_expiration_date = "Enter a valid expiration date.";
+    } else {
+      expiration = expirationRaw;
+    }
+  }
+
+  const batchNumber = optional(text(form, "initial_batch_number"), MAX.batch, errors, "initial_batch_number");
+
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  return {
+    ok: true,
+    value: { quantity, expiration_date: expiration, batch_number: batchNumber }
+  };
 }

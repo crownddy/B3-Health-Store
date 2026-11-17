@@ -150,6 +150,86 @@ await rest(`products?id=eq.${vitaminC}`, {
   body: { status: "active", is_visible_on_homepage: true }
 });
 
+// --- Batch read/write permissions -----------------------------------------
+// Batches carry expiry history. Provisioned users may read them (inventory and
+// expiry screens need to), but only super admins may write them, and the
+// public may not read them at all.
+const batchParent = await (
+  await rest("products", {
+    token: superToken,
+    method: "POST",
+    prefer: "return=representation",
+    body: { name: "Batch Perms", sku: "BATCH-PERM", selling_price: 1 }
+  })
+).json();
+const batchParentId = Array.isArray(batchParent) ? batchParent[0]?.id : "";
+const batchRows = await (
+  await rest("product_batches", {
+    token: superToken,
+    method: "POST",
+    prefer: "return=representation",
+    body: {
+      product_id: batchParentId,
+      batch_number: "PERM-1",
+      quantity_received: 10,
+      quantity_remaining: 10,
+      expiration_date: "2027-05-01"
+    }
+  })
+).json();
+const batchId = Array.isArray(batchRows) ? batchRows[0]?.id : "";
+check("super admin can insert a batch", "yes", batchId ? "yes" : "no");
+check("staff can read batches", 1, await count(`product_batches?select=id&product_id=eq.${batchParentId}`, staffToken));
+check("anon cannot read batches", 0, await count(`product_batches?select=id&product_id=eq.${batchParentId}`));
+
+const batchCountBefore = psql(`select count(*) from public.product_batches where product_id='${batchParentId}'`);
+await rest("product_batches", {
+  token: staffToken,
+  method: "POST",
+  body: {
+    product_id: batchParentId,
+    batch_number: "STAFF-1",
+    quantity_received: 5,
+    quantity_remaining: 5
+  }
+});
+check("staff INSERT on batches changes no rows", batchCountBefore, psql(`select count(*) from public.product_batches where product_id='${batchParentId}'`));
+
+await rest(`product_batches?id=eq.${batchId}`, {
+  token: staffToken,
+  method: "PATCH",
+  body: { quantity_remaining: 0, expiration_date: "2020-01-01" }
+});
+check(
+  "staff UPDATE cannot change a batch's expiry",
+  "2027-05-01",
+  psql(`select expiration_date from public.product_batches where id='${batchId}'`)
+);
+
+await rest(`product_batches?id=eq.${batchId}`, { token: staffToken, method: "DELETE" });
+check("staff DELETE leaves the batch present", 1, psql(`select count(*) from public.product_batches where id='${batchId}'`));
+
+await rest(`product_batches?id=eq.${batchId}`, {
+  token: superToken,
+  method: "PATCH",
+  body: { quantity_remaining: 3 }
+});
+check("super admin UPDATE applies to batches", 3, psql(`select quantity_remaining from public.product_batches where id='${batchId}'`));
+
+check("batch quantity cannot go negative", 400, await statusOf("product_batches", {
+  token: superToken,
+  method: "POST",
+  body: {
+    product_id: batchParentId,
+    batch_number: "NEG-1",
+    quantity_received: 1,
+    quantity_remaining: -5
+  }
+}));
+
+psql(`delete from public.product_batches where product_id='${batchParentId}'`);
+await rest(`products?id=eq.${batchParentId}`, { token: superToken, method: "DELETE" });
+
 // --- Constraints -----------------------------------------------------------
 await rest("products", { token: superToken, method: "POST", body: { name: "BC One", barcode: "6151100777777", selling_price: 1 } });
 check("duplicate barcode rejected", 409, await statusOf("products", {

@@ -64,6 +64,13 @@ create table if not exists public.product_batches (
   created_at timestamptz not null default now()
 );
 
+-- FEFO reads a product's batches ordered by expiration date; the expiry screens
+-- read across all products by expiration date.
+create index if not exists product_batches_product_expiry_idx
+  on public.product_batches (product_id, expiration_date);
+create index if not exists product_batches_expiration_idx
+  on public.product_batches (expiration_date);
+
 create table if not exists public.stock_movements (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references public.products(id) on delete restrict,
@@ -119,6 +126,18 @@ create policy "Super admin manage batches"
 on public.product_batches for all
 using (public.is_super_admin())
 with check (public.is_super_admin());
+
+-- Provisioned staff may read batches (inventory and expiry screens need the
+-- batch number, quantity and expiration date). This grants no write access.
+drop policy if exists "Provisioned users can read batches" on public.product_batches;
+create policy "Provisioned users can read batches"
+on public.product_batches for select
+using (
+  exists (
+    select 1 from public.profiles
+    where profiles.id = auth.uid()
+  )
+);
 
 drop policy if exists "Super admin manage stock movements" on public.stock_movements;
 create policy "Super admin manage stock movements"

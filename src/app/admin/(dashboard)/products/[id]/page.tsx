@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getProduct, getProductBatches, getProductReferenceCounts } from "@/lib/data";
-import { SectionCard, EmptyState, StatusPill, StatCard, money, formatDate, daysUntil } from "@/components/admin/ui";
+import { SectionCard, EmptyState, StatusPill, StatCard, money, formatDate } from "@/components/admin/ui";
 import ProductActions from "@/components/admin/ProductActions";
+import BatchTable from "@/components/admin/BatchTable";
 import { stockStatus } from "@/lib/products/stock";
 import { canDeleteProduct } from "@/lib/products/policy";
 
@@ -178,29 +179,14 @@ export default async function ProductDetailPage({
               hint="Batches with expiry dates appear here once recorded."
             />
           ) : (
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Batch</th>
-                    <th>Expires</th>
-                    <th className="admin-num">Remaining</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {batches.map((batch) => {
-                    const days = daysUntil(batch.expiration_date);
-                    return (
-                      <tr key={batch.id}>
-                        <td>{batch.batch_number ?? "—"}</td>
-                        <td>{formatDate(batch.expiration_date)}</td>
-                        <td className="admin-num">{batch.quantity_remaining}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <BatchTable
+              rows={batches.map((batch) => ({
+                id: batch.id,
+                batch_number: batch.batch_number,
+                expiration_date: batch.expiration_date,
+                quantity_remaining: batch.quantity_remaining
+              }))}
+            />
           )}
         </SectionCard>
       </div>

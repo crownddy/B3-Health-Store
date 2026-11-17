@@ -1,26 +1,46 @@
 import { requireAdmin } from "@/lib/auth";
 import { getBatches, relationName } from "@/lib/data";
-import { SectionCard, EmptyState, StatusPill, StatCard, formatDate, daysUntil } from "@/components/admin/ui";
+import { SectionCard, EmptyState, StatCard } from "@/components/admin/ui";
+import BatchTable from "@/components/admin/BatchTable";
+import ExpiryFilter from "@/components/admin/ExpiryFilter";
+import {
+  EXPIRING_SOON_DAYS,
+  classifyExpiry,
+  filterBatchesByExpiry,
+  type ExpiryStatus
+} from "@/lib/products/batches";
 
 export const dynamic = "force-dynamic";
 
-function statusFor(days: number | null) {
-  if (days === null) return { tone: "muted" as const, label: "No date" };
-  if (days < 0) return { tone: "danger" as const, label: `Expired ${Math.abs(days)}d ago` };
-  if (days === 0) return { tone: "danger" as const, label: "Expires today" };
-  if (days <= 30) return { tone: "warn" as const, label: `${days} days left` };
-  if (days <= 90) return { tone: "muted" as const, label: `${days} days left` };
-  return { tone: "good" as const, label: `${days} days left` };
+function readExpiry(value: string | string[] | undefined): ExpiryStatus | "all" {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === "expired" || raw === "expiring_soon" || raw === "valid" || raw === "no_date"
+    ? raw
+    : "all";
 }
 
-export default async function AdminExpiryPage() {
+export default async function AdminExpiryPage({
+  searchParams
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requireAdmin();
-  const batches = await getBatches();
+  const params = await searchParams;
+  const expiry = readExpiry(params.expiry);
 
-  const withDays = batches.map((batch) => ({ batch, days: daysUntil(batch.expiration_date) }));
-  const expired = withDays.filter((row) => row.days !== null && row.days < 0);
-  const soon = withDays.filter((row) => row.days !== null && row.days >= 0 && row.days <= 30);
-  const upcoming = withDays.filter((row) => row.days !== null && row.days > 30);
+  const batches = await getBatches();
+  const rows = batches.map((batch) => ({
+    id: batch.id,
+    batch_number: batch.batch_number,
+    expiration_date: batch.expiration_date,
+    quantity_remaining: batch.quantity_remaining,
+    productName: relationName(batch.products)
+  }));
+
+  const filtered = filterBatchesByExpiry(rows, expiry);
+  const expired = rows.filter((row) => classifyExpiry(row.expiration_date) === "expired");
+  const soon = rows.filter((row) => classifyExpiry(row.expiration_date) === "expiring_soon");
+  const valid = rows.filter((row) => classifyExpiry(row.expiration_date) === "valid");
 
   return (
     <>
@@ -42,121 +62,35 @@ export default async function AdminExpiryPage() {
           hint="Remove from sale"
         />
         <StatCard
-          label="Expiring ≤ 30 days"
+          label={`Expiring ≤ ${EXPIRING_SOON_DAYS} days`}
           value={String(soon.length)}
           tone={soon.length > 0 ? "warn" : "default"}
           hint="Prioritise these"
         />
-        <StatCard label="Upcoming" value={String(upcoming.length)} hint="More than 30 days out" />
-        <StatCard label="Tracked batches" value={String(batches.length)} hint="With an expiry date" />
+        <StatCard label="Valid" value={String(valid.length)} hint="Safe to sell" />
+        <StatCard label="Tracked batches" value={String(rows.length)} hint="All recorded batches" />
       </div>
 
-      {expired.length > 0 && (
+      {expired.length > 0 && expiry === "all" && (
         <SectionCard title="Expired batches" description="Do not sell these batches.">
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Batch</th>
-                  <th>Expired</th>
-                  <th className="admin-num">Remaining</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {expired.map(({ batch, days }) => {
-                  const status = statusFor(days);
-                  return (
-                    <tr key={batch.id}>
-                      <td>{relationName(batch.products)}</td>
-                      <td>{batch.batch_number ?? "—"}</td>
-                      <td>{formatDate(batch.expiration_date)}</td>
-                      <td className="admin-num">{batch.quantity_remaining}</td>
-                      <td>
-                        <StatusPill tone={status.tone}>{status.label}</StatusPill>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <BatchTable rows={expired} showProduct />
         </SectionCard>
       )}
 
-      <SectionCard title="Expiring soon" description="Batches expiring within 30 days.">
-        {soon.length === 0 ? (
-          <EmptyState title="Nothing expiring soon" hint="No batches expire in the next 30 days." />
-        ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Batch</th>
-                  <th>Expires</th>
-                  <th className="admin-num">Remaining</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {soon.map(({ batch, days }) => {
-                  const status = statusFor(days);
-                  return (
-                    <tr key={batch.id}>
-                      <td>{relationName(batch.products)}</td>
-                      <td>{batch.batch_number ?? "—"}</td>
-                      <td>{formatDate(batch.expiration_date)}</td>
-                      <td className="admin-num">{batch.quantity_remaining}</td>
-                      <td>
-                        <StatusPill tone={status.tone}>{status.label}</StatusPill>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard title="All tracked batches" description="Every batch with a recorded expiry date.">
-        {batches.length === 0 ? (
+      <SectionCard
+        title="All batches"
+        description="Batch number, available quantity and expiration status."
+        actions={<ExpiryFilter basePath="/admin/expiry" />}
+      >
+        {rows.length === 0 ? (
           <EmptyState
-            title="No batch expiry dates"
-            hint="Add batches with expiration dates to track expiry here."
+            title="No batches recorded"
+            hint="Receive stock with an expiration date to track expiry here."
           />
+        ) : filtered.length === 0 ? (
+          <EmptyState title="No batches match this filter" hint="Try a different expiration status." />
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Batch</th>
-                  <th>Expires</th>
-                  <th className="admin-num">Remaining</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withDays.map(({ batch, days }) => {
-                  const status = statusFor(days);
-                  return (
-                    <tr key={batch.id}>
-                      <td>{relationName(batch.products)}</td>
-                      <td>{batch.batch_number ?? "—"}</td>
-                      <td>{formatDate(batch.expiration_date)}</td>
-                      <td className="admin-num">{batch.quantity_remaining}</td>
-                      <td>
-                        <StatusPill tone={status.tone}>{status.label}</StatusPill>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <BatchTable rows={filtered} showProduct />
         )}
       </SectionCard>
     </>

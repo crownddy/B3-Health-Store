@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateProductInput, firstError } from "../src/lib/products/validation.ts";
+import { validateProductInput, validateInitialStock, firstError } from "../src/lib/products/validation.ts";
 import type { ProductRecord } from "../src/lib/products/types.ts";
 
 function record(overrides: Partial<ProductRecord> = {}): ProductRecord {
@@ -139,4 +139,67 @@ test("the validated value never contains a quantity field", () => {
 test("firstError returns a message", () => {
   assert.equal(firstError({}), "Please correct the highlighted fields.");
   assert.equal(firstError({ name: "Name is required." }), "Name is required.");
+});
+
+// --- Initial stock ---------------------------------------------------------
+test("validateInitialStock returns null when no quantity is entered", () => {
+  const result = validateInitialStock(form({}));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value, null);
+});
+
+test("validateInitialStock treats a zero quantity as no batch", () => {
+  const result = validateInitialStock(form({ initial_quantity: "0" }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value, null);
+});
+
+test("validateInitialStock accepts a quantity with an expiration date and batch number", () => {
+  const result = validateInitialStock(
+    form({ initial_quantity: "24", initial_expiration_date: "2027-01-31", initial_batch_number: "LOT-1" })
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value, {
+    quantity: 24,
+    expiration_date: "2027-01-31",
+    batch_number: "LOT-1"
+  });
+});
+
+test("validateInitialStock allows a quantity without an expiration date", () => {
+  const result = validateInitialStock(form({ initial_quantity: "5" }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value, { quantity: 5, expiration_date: null, batch_number: null });
+});
+
+test("validateInitialStock rejects a negative or non-integer quantity", () => {
+  const negative = validateInitialStock(form({ initial_quantity: "-4" }));
+  assert.equal(negative.ok, false);
+  if (!negative.ok) assert.ok(negative.errors.initial_quantity);
+
+  const fractional = validateInitialStock(form({ initial_quantity: "2.5" }));
+  assert.equal(fractional.ok, false);
+  if (!fractional.ok) assert.ok(fractional.errors.initial_quantity);
+});
+
+test("validateInitialStock rejects an invalid expiration date", () => {
+  const result = validateInitialStock(
+    form({ initial_quantity: "3", initial_expiration_date: "not-a-date" })
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(result.errors.initial_expiration_date);
+});
+
+test("validateInitialStock rejects an over-long batch number", () => {
+  const result = validateInitialStock(
+    form({ initial_quantity: "3", initial_batch_number: "x".repeat(90) })
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(result.errors.initial_batch_number);
 });

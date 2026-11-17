@@ -5,8 +5,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { getProductReferenceCounts, getProducts } from "@/lib/data";
-import { validateProductInput, firstError } from "@/lib/products/validation";
+import { validateProductInput, validateInitialStock, firstError } from "@/lib/products/validation";
 import { canDeleteProduct } from "@/lib/products/policy";
+import { generateBatchNumber } from "@/lib/products/batches";
 import { describeWriteError } from "@/lib/products/errors";
 import type { ProductActionState } from "@/lib/products/action-state";
 
@@ -27,6 +28,9 @@ function collectFormValues(formData: FormData): Record<string, string> {
     "minimum_stock",
     "shelf_number",
     "image_url",
+    "initial_quantity",
+    "initial_expiration_date",
+    "initial_batch_number",
     "is_visible_on_homepage",
     "is_featured"
   ];
@@ -49,22 +53,27 @@ export async function createProduct(
   _prev: ProductActionState | undefined,
   formData: FormData
 ): Promise<ProductActionState> {
-  await requireSuperAdmin();
+  const identity = await requireSuperAdmin();
   const existing = await getProducts();
 
   const result = validateProductInput(formData, existing, null);
-  if (!result.ok) {
+  const initial = validateInitialStock(formData);
+  if (!result.ok || !initial.ok) {
+    const errors = {
+      ...(result.ok ? {} : result.errors),
+      ...(initial.ok ? {} : initial.errors)
+    };
     return {
       ok: false,
-      message: firstError(result.errors),
-      errors: result.errors,
+      message: firstError(errors),
+      errors,
       values: collectFormValues(formData)
     };
   }
 
   const supabase = await createClient();
-  // quantity is intentionally set to 0: stock is only ever changed through the
-  // stock-movement workflow, never by creating or editing a product.
+  // quantity starts at 0 and is raised below only when opening stock is given,
+  // so stock is still only ever changed through a recorded batch/movement.
   const { data, error } = await supabase
     .from("products")
     .insert({ ...result.value, quantity: 0 })
@@ -73,12 +82,70 @@ export async function createProduct(
 
   if (error) return { ok: false, message: describeWriteError(error) };
 
+  const productId = data?.id ?? "";
+  const opening = initial.value;
+
+  if (productId && opening) {
+    // Opening stock becomes a real batch with its own expiration date, plus a
+    // matching stock-in movement, so the product's quantity and its history
+    // agree from the moment it is created.
+    const batchNumber = opening.batch_number || generateBatchNumber();
+    const { data: batch, error: batchError } = await supabase
+      .from("product_batches")
+      .insert({
+        product_id: productId,
+        batch_number: batchNumber,
+        quantity_received: opening.quantity,
+        quantity_remaining: opening.quantity,
+        expiration_date: opening.expiration_date
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (batchError) {
+      return {
+        ok: false,
+        message: `Product created, but the initial batch could not be saved: ${batchError.message}`
+      };
+    }
+
+    const { error: movementError } = await supabase.from("stock_movements").insert({
+      product_id: productId,
+      batch_id: batch?.id ?? null,
+      movement_type: "stock_in",
+      quantity: opening.quantity,
+      note: "Opening stock",
+      created_by: identity.user.id
+    });
+
+    if (movementError) {
+      return {
+        ok: false,
+        message: `Product created, but the opening stock movement could not be recorded: ${movementError.message}`
+      };
+    }
+
+    const { error: quantityError } = await supabase
+      .from("products")
+      .update({ quantity: opening.quantity, updated_at: new Date().toISOString() })
+      .eq("id", productId);
+
+    if (quantityError) {
+      return {
+        ok: false,
+        message: `Product created, but the stock level could not be set: ${quantityError.message}`
+      };
+    }
+  }
+
   revalidatePath("/admin/products");
   revalidatePath("/admin/inventory");
+  revalidatePath("/admin/stock");
+  revalidatePath("/admin/expiry");
   revalidatePath("/admin");
   revalidatePath("/");
 
-  redirect(`/admin/products/${data?.id ?? ""}?created=1`);
+  redirect(`/admin/products/${productId}?created=1`);
 }
 
 export async function updateProduct(

@@ -7,6 +7,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { readdirSync } from "node:fs";
 import { REPO_ROOT, loadKeys, resolveConfig } from "./env.mjs";
 import { psql, psqlFile } from "./db.mjs";
 
@@ -65,10 +66,14 @@ export function setRolePasswords() {
   psql(`alter user supabase_storage_admin with password '${keys.LOCAL_STORAGE_DB_PASSWORD}';`);
 }
 
-/** Applies schema.sql then the migration, and grants the API roles table access. */
+/** Applies schema.sql then every migration in order, and grants the API roles access. */
 export function applySchema() {
   psqlFile(join(REPO_ROOT, "supabase", "schema.sql"));
-  psqlFile(join(REPO_ROOT, "supabase", "migrations", "20261116_product_management.sql"));
+  const migrationsDir = join(REPO_ROOT, "supabase", "migrations");
+  // Filenames are date-prefixed, so a plain sort applies them oldest first.
+  for (const file of readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
+    psqlFile(join(migrationsDir, file));
+  }
   psql(`
     grant usage on schema public to anon, authenticated, service_role;
     grant usage on schema storage to anon, authenticated, service_role;

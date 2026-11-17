@@ -1,17 +1,54 @@
 import { requireAdmin } from "@/lib/auth";
-import { getDashboardMetrics, getProducts } from "@/lib/data";
+import { getBatches, getDashboardMetrics, getProducts, relationName } from "@/lib/data";
 import { SectionCard, EmptyState, StatusPill, StatCard, money } from "@/components/admin/ui";
+import BatchTable from "@/components/admin/BatchTable";
+import ExpiryFilter from "@/components/admin/ExpiryFilter";
+import { filterBatchesByExpiry, classifyExpiry, type ExpiryStatus } from "@/lib/products/batches";
+import { stockStatus } from "@/lib/products/stock";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminInventoryPage() {
+function readExpiry(value: string | string[] | undefined): ExpiryStatus | "all" {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === "expired" || raw === "expiring_soon" || raw === "valid" || raw === "no_date"
+    ? raw
+    : "all";
+}
+
+export default async function AdminInventoryPage({
+  searchParams
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requireAdmin();
-  const [products, metrics] = await Promise.all([getProducts(), getDashboardMetrics()]);
+  const params = await searchParams;
+  const expiry = readExpiry(params.expiry);
+
+  const [products, metrics, batches] = await Promise.all([
+    getProducts(),
+    getDashboardMetrics(),
+    getBatches()
+  ]);
 
   const sorted = [...products].sort((a, b) => {
     const rank = (q: number, min: number) => (q <= 0 ? 0 : q <= min ? 1 : 2);
     return rank(a.quantity, a.minimum_stock) - rank(b.quantity, b.minimum_stock);
   });
+
+  const batchRows = filterBatchesByExpiry(batches, expiry).map((batch) => ({
+    id: batch.id,
+    batch_number: batch.batch_number,
+    expiration_date: batch.expiration_date,
+    quantity_remaining: batch.quantity_remaining,
+    productName: relationName(batch.products)
+  }));
+
+  const expiredCount = batches.filter(
+    (batch) => classifyExpiry(batch.expiration_date) === "expired"
+  ).length;
+  const expiringSoonCount = batches.filter(
+    (batch) => classifyExpiry(batch.expiration_date) === "expiring_soon"
+  ).length;
 
   return (
     <>
@@ -19,7 +56,9 @@ export default async function AdminInventoryPage() {
         <div>
           <p className="admin-eyebrow">STOCK CONTROL</p>
           <h1>Inventory</h1>
-          <p className="admin-page-sub">Current stock levels, values and reorder alerts.</p>
+          <p className="admin-page-sub">
+            Current stock levels, per-batch expiry and reorder alerts.
+          </p>
         </div>
       </div>
 
@@ -65,12 +104,7 @@ export default async function AdminInventoryPage() {
               </thead>
               <tbody>
                 {sorted.map((product) => {
-                  const status =
-                    product.quantity <= 0
-                      ? { tone: "danger" as const, label: "Out of stock" }
-                      : product.quantity <= product.minimum_stock
-                        ? { tone: "warn" as const, label: "Low stock" }
-                        : { tone: "good" as const, label: "In stock" };
+                  const status = stockStatus(product.quantity, product.minimum_stock);
                   return (
                     <tr key={product.id}>
                       <td>{product.name}</td>
@@ -89,6 +123,23 @@ export default async function AdminInventoryPage() {
               </tbody>
             </table>
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Batches & expiry"
+        description={`Every batch with its number, available quantity and expiry. ${expiredCount} expired · ${expiringSoonCount} expiring soon.`}
+        actions={<ExpiryFilter basePath="/admin/inventory" />}
+      >
+        {batches.length === 0 ? (
+          <EmptyState
+            title="No batches recorded"
+            hint="Receive stock with an expiration date to track batches here."
+          />
+        ) : batchRows.length === 0 ? (
+          <EmptyState title="No batches match this filter" hint="Try a different expiration status." />
+        ) : (
+          <BatchTable rows={batchRows} showProduct />
         )}
       </SectionCard>
     </>
