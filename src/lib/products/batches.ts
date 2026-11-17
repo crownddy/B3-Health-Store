@@ -1,24 +1,22 @@
 /**
- * Batch and expiration rules for multi-batch inventory.
+ * Expiration rules for multi-batch inventory.
  *
- * Everything here is pure so the expiry classification, batch-number
- * generation, receipt targeting and the FEFO (First Expired, First Out)
- * deduction plan can be unit tested without a database. The server actions
- * perform the actual reads and writes using these decisions.
+ * This module holds only the presentation-side expiry logic the UI needs
+ * (classification, labels, filtering and date normalisation). It is pure, so it
+ * is unit-testable without a database.
+ *
+ * The authoritative stock logic — batch-number generation, deciding whether a
+ * receipt tops up an existing batch or creates a new one, and the FEFO
+ * deduction — lives in the database functions (see
+ * supabase/migrations/20261117b_atomic_inventory_operations.sql). Keeping it in
+ * one place means the browser and the server can never disagree about which
+ * batch a unit came from, and the whole operation stays atomic.
  */
 
 /** A batch expiring within this many days is flagged as "expiring soon". */
 export const EXPIRING_SOON_DAYS = 30;
 
 export type ExpiryStatus = "expired" | "expiring_soon" | "valid" | "no_date";
-
-/** The subset of a batch these rules need. */
-export type BatchLike = {
-  id: string;
-  batch_number: string | null;
-  expiration_date: string | null;
-  quantity_remaining: number;
-};
 
 function startOfDay(value: Date): Date {
   const date = new Date(value);
@@ -100,138 +98,4 @@ export function normalizeDateString(value: string | null | undefined): string | 
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
-}
-
-/**
- * Generates a batch number when the user does not supply one.
- *
- * The number is date-stamped and made unique against the numbers already used
- * for the product, so a generated number never collides with an existing batch.
- */
-export function generateBatchNumber(when: Date = new Date(), existing: Iterable<string> = []): string {
-  const stamp = `${when.getFullYear()}${String(when.getMonth() + 1).padStart(2, "0")}${String(
-    when.getDate()
-  ).padStart(2, "0")}`;
-  const base = `B3-${stamp}`;
-  const taken = new Set(existing);
-  if (!taken.has(base)) return base;
-  let suffix = 2;
-  while (taken.has(`${base}-${suffix}`)) suffix += 1;
-  return `${base}-${suffix}`;
-}
-
-export type ReceiptTarget =
-  | { kind: "accumulate"; batchId: string }
-  | { kind: "create"; batchNumber: string };
-
-/**
- * Decides where a stock receipt lands.
- *
- * A receipt joins an existing batch only when the supplied batch number matches
- * AND the expiration date is identical, so a different batch (or the same
- * number with a different expiry) never overwrites an existing batch's
- * expiration date. It is given a fresh, unique batch number instead.
- */
-export function resolveReceiptTarget(
-  batches: BatchLike[],
-  suppliedNumber: string | null,
-  expirationDate: string | null,
-  when: Date = new Date()
-): ReceiptTarget {
-  const number = (suppliedNumber ?? "").trim();
-  const existingNumbers = batches
-    .map((batch) => (batch.batch_number ?? "").trim())
-    .filter((value) => value.length > 0);
-
-  if (number) {
-    const sameNumber = batches.filter((batch) => (batch.batch_number ?? "").trim() === number);
-    const match = sameNumber.find(
-      (batch) => normalizeDateString(batch.expiration_date) === normalizeDateString(expirationDate)
-    );
-    if (match) return { kind: "accumulate", batchId: match.id };
-    // A different batch already uses this number with another expiry. Keep that
-    // batch untouched and create the new one under a distinct number.
-    if (sameNumber.length > 0) {
-      return { kind: "create", batchNumber: generateBatchNumber(when, existingNumbers) };
-    }
-    return { kind: "create", batchNumber: number };
-  }
-
-  return { kind: "create", batchNumber: generateBatchNumber(when, existingNumbers) };
-}
-
-/** Orders batches for FEFO: earliest expiration first, undated batches last. */
-export function compareFefo(a: BatchLike, b: BatchLike): number {
-  const left = a.expiration_date ? Date.parse(a.expiration_date) : null;
-  const right = b.expiration_date ? Date.parse(b.expiration_date) : null;
-  if (left === null && right === null) return a.id.localeCompare(b.id);
-  if (left === null) return 1;
-  if (right === null) return -1;
-  if (left !== right) return left - right;
-  return a.id.localeCompare(b.id);
-}
-
-export type FefoDeduction = {
-  batchId: string;
-  batchNumber: string | null;
-  quantity: number;
-};
-
-export type FefoPlan =
-  | { ok: true; deductions: FefoDeduction[]; unbatchedQuantity: number; available: number }
-  | { ok: false; reason: string; available: number };
-
-/**
- * Builds the FEFO deduction plan for a stock-out.
- *
- * Batches are consumed earliest-expiry-first. Expired batches are never
- * deducted, so expired stock cannot be sold. When a product has stock that is
- * not yet broken into batches (legacy rows), the shortfall is taken from that
- * unbatched portion, keeping the workflow working for products created before
- * batch tracking existed.
- */
-export function planFefo(
-  batches: BatchLike[],
-  requested: number,
-  productQuantity: number,
-  today: Date = new Date()
-): FefoPlan {
-  const quantity = Math.trunc(requested);
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    return { ok: false, reason: "Quantity must be a whole number greater than zero.", available: 0 };
-  }
-
-  const totalBatchRemaining = batches.reduce(
-    (sum, batch) => sum + Math.max(0, batch.quantity_remaining),
-    0
-  );
-  const unbatchedAvailable = Math.max(0, productQuantity - totalBatchRemaining);
-
-  const sellable = batches
-    .filter(
-      (batch) => batch.quantity_remaining > 0 && classifyExpiry(batch.expiration_date, today) !== "expired"
-    )
-    .sort(compareFefo);
-
-  const sellableTotal = sellable.reduce((sum, batch) => sum + batch.quantity_remaining, 0);
-  const available = Math.min(productQuantity, sellableTotal + unbatchedAvailable);
-
-  if (quantity > available) {
-    return {
-      ok: false,
-      reason: `Only ${available} unit${available === 1 ? "" : "s"} are available to sell.`,
-      available
-    };
-  }
-
-  const deductions: FefoDeduction[] = [];
-  let remaining = quantity;
-  for (const batch of sellable) {
-    if (remaining <= 0) break;
-    const take = Math.min(batch.quantity_remaining, remaining);
-    deductions.push({ batchId: batch.id, batchNumber: batch.batch_number, quantity: take });
-    remaining -= take;
-  }
-
-  return { ok: true, deductions, unbatchedQuantity: remaining, available };
 }

@@ -54,6 +54,7 @@ for setup and run instructions.
 
    - `20261116_product_management.sql`
    - `20261117_multiple_expiration_tracking.sql`
+   - `20261117b_atomic_inventory_operations.sql`
 
 4. In Supabase Authentication, create the first admin user.
 5. In SQL Editor, promote that user (replace the email):

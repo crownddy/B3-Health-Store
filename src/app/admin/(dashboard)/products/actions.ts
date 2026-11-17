@@ -7,7 +7,6 @@ import { requireSuperAdmin } from "@/lib/auth";
 import { getProductReferenceCounts, getProducts } from "@/lib/data";
 import { validateProductInput, validateInitialStock, firstError } from "@/lib/products/validation";
 import { canDeleteProduct } from "@/lib/products/policy";
-import { generateBatchNumber } from "@/lib/products/batches";
 import { describeWriteError } from "@/lib/products/errors";
 import type { ProductActionState } from "@/lib/products/action-state";
 
@@ -53,7 +52,7 @@ export async function createProduct(
   _prev: ProductActionState | undefined,
   formData: FormData
 ): Promise<ProductActionState> {
-  const identity = await requireSuperAdmin();
+  await requireSuperAdmin();
   const existing = await getProducts();
 
   const result = validateProductInput(formData, existing, null);
@@ -71,72 +70,33 @@ export async function createProduct(
     };
   }
 
+  const opening = initial.value;
   const supabase = await createClient();
-  // quantity starts at 0 and is raised below only when opening stock is given,
-  // so stock is still only ever changed through a recorded batch/movement.
-  const { data, error } = await supabase
-    .from("products")
-    .insert({ ...result.value, quantity: 0 })
-    .select("id")
-    .maybeSingle();
+  // The product, its opening batch, the matching stock-in movement and the
+  // total quantity are written by one function in a single transaction. Either
+  // all of them are created or none are, so a product can never be left with a
+  // batch but no movement (or a total that disagrees with its batches).
+  const { data, error } = await supabase.rpc("create_product_with_initial_stock", {
+    p_name: result.value.name,
+    p_description: result.value.description,
+    p_category: result.value.category,
+    p_sku: result.value.sku,
+    p_barcode: result.value.barcode,
+    p_image_url: result.value.image_url,
+    p_purchase_price: result.value.purchase_price,
+    p_selling_price: result.value.selling_price,
+    p_minimum_stock: result.value.minimum_stock,
+    p_shelf_number: result.value.shelf_number,
+    p_is_visible_on_homepage: result.value.is_visible_on_homepage,
+    p_is_featured: result.value.is_featured,
+    p_initial_quantity: opening?.quantity ?? 0,
+    p_initial_expiration_date: opening?.expiration_date ?? null,
+    p_initial_batch_number: opening?.batch_number ?? null
+  });
 
   if (error) return { ok: false, message: describeWriteError(error) };
 
-  const productId = data?.id ?? "";
-  const opening = initial.value;
-
-  if (productId && opening) {
-    // Opening stock becomes a real batch with its own expiration date, plus a
-    // matching stock-in movement, so the product's quantity and its history
-    // agree from the moment it is created.
-    const batchNumber = opening.batch_number || generateBatchNumber();
-    const { data: batch, error: batchError } = await supabase
-      .from("product_batches")
-      .insert({
-        product_id: productId,
-        batch_number: batchNumber,
-        quantity_received: opening.quantity,
-        quantity_remaining: opening.quantity,
-        expiration_date: opening.expiration_date
-      })
-      .select("id")
-      .maybeSingle();
-
-    if (batchError) {
-      return {
-        ok: false,
-        message: `Product created, but the initial batch could not be saved: ${batchError.message}`
-      };
-    }
-
-    const { error: movementError } = await supabase.from("stock_movements").insert({
-      product_id: productId,
-      batch_id: batch?.id ?? null,
-      movement_type: "stock_in",
-      quantity: opening.quantity,
-      note: "Opening stock",
-      created_by: identity.user.id
-    });
-
-    if (movementError) {
-      return {
-        ok: false,
-        message: `Product created, but the opening stock movement could not be recorded: ${movementError.message}`
-      };
-    }
-
-    const { error: quantityError } = await supabase
-      .from("products")
-      .update({ quantity: opening.quantity, updated_at: new Date().toISOString() })
-      .eq("id", productId);
-
-    if (quantityError) {
-      return {
-        ok: false,
-        message: `Product created, but the stock level could not be set: ${quantityError.message}`
-      };
-    }
-  }
+  const productId = (data as { product_id?: string } | null)?.product_id ?? "";
 
   revalidatePath("/admin/products");
   revalidatePath("/admin/inventory");
