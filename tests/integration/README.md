@@ -10,7 +10,8 @@ Three suites live here:
 |---|---|---|
 | RLS / authorization | `rls.suite.mjs` | Every read/write policy for products and profiles |
 | Atomicity / concurrency | `transactions.suite.mjs` | The inventory RPCs commit all-or-nothing, failed operations leave no trace, FEFO spans batches, and concurrent stock-outs cannot oversell |
-| Browser E2E | `e2e.suite.mjs` | The admin console UI end to end in a real browser |
+| Sold screen | `sold.suite.mjs` | The sellable-availability helpers list only sellable products with the right quantity, expired stock is excluded, and a sale deducts through the stock-out RPC (FEFO, atomic, authorized) |
+| Browser E2E | `e2e.suite.mjs` | The admin console UI end to end in a real browser, including the Sold screen |
 
 ## Safety: local only
 
@@ -48,7 +49,10 @@ npm run test:integration:rls
 # 4. Atomicity / concurrency suite
 npm run test:integration:transactions
 
-# 5. Browser E2E suite (starts and stops the app itself)
+# 5. Sold screen suite
+npm run test:integration:sold
+
+# 6. Browser E2E suite (starts and stops the app itself)
 npm run build
 npm run test:integration:e2e
 ```

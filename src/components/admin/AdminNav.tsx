@@ -16,6 +16,7 @@ const ITEMS: NavItem[] = [
   { href: "/admin/products", label: "Products", icon: "▤" },
   { href: "/admin/inventory", label: "Inventory", icon: "▥" },
   { href: "/admin/stock", label: "Stock In / Out", icon: "⇄" },
+  { href: "/admin/sold", label: "Sold", icon: "🧾" },
   { href: "/admin/expiry", label: "Expiry Management", icon: "⏱" },
   { href: "/admin/staff", label: "Staff Management", icon: "☺", superAdminOnly: true },
   { href: "/admin/reports", label: "Reports", icon: "▨" },

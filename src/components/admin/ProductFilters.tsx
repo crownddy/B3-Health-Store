@@ -49,7 +49,7 @@ export default function ProductFilters({ categories }: { categories: string[] })
           type="search"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search by name, SKU or barcode"
+          placeholder="Search by name or category"
           aria-label="Search products"
         />
       </div>

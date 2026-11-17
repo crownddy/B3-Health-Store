@@ -75,6 +75,12 @@ function checkbox(form: FormData, key: string): boolean {
  * Runs on the server before any write, so a forged request cannot bypass the
  * rules. Uniqueness of SKU and barcode is checked case-insensitively here and
  * is additionally guaranteed by the database unique constraints.
+ *
+ * SKU, barcode, cost price and reorder level are no longer shown in the admin
+ * UI, so the form does not submit them. When a field is absent from the form
+ * (as opposed to submitted empty) the current stored value is carried over, so
+ * an ordinary edit never blanks data that was entered before those fields were
+ * hidden.
  */
 export function validateProductInput(
   form: FormData,
@@ -82,13 +88,18 @@ export function validateProductInput(
   currentId: string | null
 ): ValidationResult {
   const errors: Record<string, string> = {};
+  const current = currentId ? existing.find((product) => product.id === currentId) ?? null : null;
+
+  /** The submitted value, or the stored one when the field is not on the form. */
+  const kept = (key: string): string =>
+    form.has(key) ? text(form, key) : String(current?.[key as keyof ProductRecord] ?? "");
 
   const name = text(form, "name");
   if (!name) errors.name = "Name is required.";
   else if (name.length > MAX.name) errors.name = `Name must be ${MAX.name} characters or fewer.`;
 
-  const skuRaw = text(form, "sku");
-  const barcodeRaw = text(form, "barcode");
+  const skuRaw = kept("sku");
+  const barcodeRaw = kept("barcode");
   const sku = optional(skuRaw, MAX.sku, errors, "sku");
   const barcode = optional(barcodeRaw, MAX.barcode, errors, "barcode");
 
@@ -110,9 +121,9 @@ export function validateProductInput(
     barcode,
     category: optional(text(form, "category"), MAX.category, errors, "category"),
     description: optional(text(form, "description"), MAX.description, errors, "description"),
-    purchase_price: amount(text(form, "purchase_price"), "Cost price", errors, "purchase_price"),
+    purchase_price: amount(kept("purchase_price"), "Cost price", errors, "purchase_price"),
     selling_price: amount(text(form, "selling_price"), "Selling price", errors, "selling_price"),
-    minimum_stock: wholeNumber(text(form, "minimum_stock"), "Reorder level", errors, "minimum_stock"),
+    minimum_stock: wholeNumber(kept("minimum_stock"), "Reorder level", errors, "minimum_stock"),
     shelf_number: optional(text(form, "shelf_number"), MAX.shelf, errors, "shelf_number"),
     image_url: optional(text(form, "image_url"), 600, errors, "image_url"),
     is_visible_on_homepage: checkbox(form, "is_visible_on_homepage"),

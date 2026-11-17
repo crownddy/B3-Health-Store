@@ -20,7 +20,7 @@ export function filterProducts(products: ProductRecord[], query: CatalogQuery): 
     }
 
     if (term) {
-      const haystack = [product.name, product.sku, product.barcode]
+      const haystack = [product.name, product.category]
         .map((value) => (value ?? "").toLowerCase())
         .join(" ");
       if (!haystack.includes(term)) return false;
