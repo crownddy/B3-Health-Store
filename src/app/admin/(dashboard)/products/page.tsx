@@ -100,8 +100,6 @@ export default async function AdminProductsPage({
                 <tr>
                   <th>Product</th>
                   <th>Category</th>
-                  <th>SKU</th>
-                  <th className="admin-num">Buy</th>
                   <th className="admin-num">Sell</th>
                   <th className="admin-num">Qty</th>
                   <th>Stock</th>
@@ -123,8 +121,6 @@ export default async function AdminProductsPage({
                         )}
                       </td>
                       <td>{product.category ?? "—"}</td>
-                      <td className="admin-mono">{product.sku ?? "—"}</td>
-                      <td className="admin-num">{money(product.purchase_price)}</td>
                       <td className="admin-num">{money(product.selling_price)}</td>
                       <td className="admin-num">{product.quantity}</td>
                       <td>

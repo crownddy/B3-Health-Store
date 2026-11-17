@@ -1,6 +1,6 @@
 import { requireAdmin } from "@/lib/auth";
 import { getBatches, getDashboardMetrics, getProducts, relationName } from "@/lib/data";
-import { SectionCard, EmptyState, StatusPill, StatCard, money } from "@/components/admin/ui";
+import { SectionCard, EmptyState, StatusPill, StatCard } from "@/components/admin/ui";
 import BatchTable from "@/components/admin/BatchTable";
 import ExpiryFilter from "@/components/admin/ExpiryFilter";
 import { filterBatchesByExpiry, classifyExpiry, type ExpiryStatus } from "@/lib/products/batches";
@@ -65,11 +65,6 @@ export default async function AdminInventoryPage({
       <div className="admin-stats">
         <StatCard label="Stock units" value={String(metrics.stockUnits)} hint="Total on hand" />
         <StatCard
-          label="Inventory value"
-          value={money(metrics.inventoryValue)}
-          hint="At selling price"
-        />
-        <StatCard
           label="Low stock"
           value={String(metrics.lowStockCount)}
           tone={metrics.lowStockCount > 0 ? "warn" : "default"}
@@ -97,8 +92,6 @@ export default async function AdminInventoryPage({
                   <th>Product</th>
                   <th>Shelf</th>
                   <th className="admin-num">Qty</th>
-                  <th className="admin-num">Min</th>
-                  <th className="admin-num">Stock value</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -110,10 +103,6 @@ export default async function AdminInventoryPage({
                       <td>{product.name}</td>
                       <td>{product.shelf_number ?? "—"}</td>
                       <td className="admin-num">{product.quantity}</td>
-                      <td className="admin-num">{product.minimum_stock}</td>
-                      <td className="admin-num">
-                        {money(Number(product.selling_price) * Number(product.quantity))}
-                      </td>
                       <td>
                         <StatusPill tone={status.tone}>{status.label}</StatusPill>
                       </td>

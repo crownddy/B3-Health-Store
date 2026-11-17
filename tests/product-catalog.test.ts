@@ -40,14 +40,14 @@ test("searches by name", () => {
   assert.deepEqual(out.map((p) => p.id), ["b"]);
 });
 
-test("searches by SKU", () => {
-  const out = filterProducts(catalogue, { search: "vit-d" });
-  assert.deepEqual(out.map((p) => p.id), ["c"]);
+test("searches by category", () => {
+  const out = filterProducts(catalogue, { search: "wellness" });
+  assert.deepEqual(out.map((p) => p.id), ["b"]);
 });
 
-test("searches by barcode", () => {
-  const out = filterProducts(catalogue, { search: "222" });
-  assert.deepEqual(out.map((p) => p.id), ["b"]);
+test("no longer matches the hidden SKU or barcode fields", () => {
+  assert.deepEqual(filterProducts(catalogue, { search: "vit-d" }), []);
+  assert.deepEqual(filterProducts(catalogue, { search: "222" }), []);
 });
 
 test("filters by status", () => {

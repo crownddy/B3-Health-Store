@@ -32,7 +32,6 @@ export default async function ProductDetailPage({
 
   const decision = canDeleteProduct(references);
   const stock = stockStatus(product.quantity, product.minimum_stock);
-  const margin = Number(product.selling_price) - Number(product.purchase_price);
 
   return (
     <>
@@ -41,7 +40,7 @@ export default async function ProductDetailPage({
           <p className="admin-eyebrow">PRODUCT</p>
           <h1>{product.name}</h1>
           <p className="admin-page-sub">
-            {product.category ?? "Uncategorised"} · SKU {product.sku ?? "—"} ·{" "}
+            {product.category ?? "Uncategorised"} ·{" "}
             <StatusPill tone={product.status === "active" ? "good" : "muted"}>
               {product.status === "active" ? "Active" : "Archived"}
             </StatusPill>
@@ -72,27 +71,12 @@ export default async function ProductDetailPage({
 
       <div className="admin-stats">
         <StatCard label="On hand" value={String(product.quantity)} hint={stock.label} tone={stock.tone === "good" ? "good" : stock.tone === "warn" ? "warn" : "danger"} />
-        <StatCard label="Reorder level" value={String(product.minimum_stock)} hint="Alert threshold" />
         <StatCard label="Selling price" value={money(product.selling_price)} hint="Per unit" />
-        <StatCard
-          label="Margin"
-          value={money(margin)}
-          tone={margin < 0 ? "danger" : "default"}
-          hint="Selling − cost"
-        />
       </div>
 
       <div className="admin-grid-2">
         <SectionCard title="Details" description="Descriptive information for this product.">
           <dl className="admin-detail-list">
-            <div>
-              <dt>Barcode</dt>
-              <dd className="admin-mono">{product.barcode ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Cost price</dt>
-              <dd>{money(product.purchase_price)}</dd>
-            </div>
             <div>
               <dt>Selling price</dt>
               <dd>{money(product.selling_price)}</dd>
@@ -151,10 +135,6 @@ export default async function ProductDetailPage({
               <dd>
                 <strong>{product.quantity}</strong>
               </dd>
-            </div>
-            <div>
-              <dt>Reorder level</dt>
-              <dd>{product.minimum_stock}</dd>
             </div>
             <div>
               <dt>Availability</dt>

@@ -17,12 +17,8 @@ type Props = {
 type TextField =
   | "name"
   | "category"
-  | "sku"
-  | "barcode"
   | "description"
-  | "purchase_price"
   | "selling_price"
-  | "minimum_stock"
   | "shelf_number"
   | "image_url";
 
@@ -126,34 +122,6 @@ export default function ProductForm({ mode, product, categories }: Props) {
         </label>
       </div>
 
-      <div className="admin-form-row">
-        <label className="admin-field">
-          <span>SKU</span>
-          <input
-            type="text"
-            name="sku"
-            defaultValue={text("sku")}
-            maxLength={64}
-            placeholder="e.g. B3-VITC-1000"
-            disabled={busy}
-          />
-          {errors.sku && <small className="admin-field-error">{errors.sku}</small>}
-        </label>
-
-        <label className="admin-field">
-          <span>Barcode</span>
-          <input
-            type="text"
-            name="barcode"
-            defaultValue={text("barcode")}
-            maxLength={64}
-            placeholder="e.g. 6151100123456"
-            disabled={busy}
-          />
-          {errors.barcode && <small className="admin-field-error">{errors.barcode}</small>}
-        </label>
-      </div>
-
       <label className="admin-field">
         <span>Description</span>
         <textarea
@@ -169,21 +137,6 @@ export default function ProductForm({ mode, product, categories }: Props) {
 
       <div className="admin-form-row">
         <label className="admin-field">
-          <span>Cost price (₦)</span>
-          <input
-            type="number"
-            name="purchase_price"
-            defaultValue={text("purchase_price")}
-            min={0}
-            step="0.01"
-            inputMode="decimal"
-            placeholder="0.00"
-            disabled={busy}
-          />
-          {errors.purchase_price && <small className="admin-field-error">{errors.purchase_price}</small>}
-        </label>
-
-        <label className="admin-field">
           <span>Selling price (₦)</span>
           <input
             type="number"
@@ -196,23 +149,6 @@ export default function ProductForm({ mode, product, categories }: Props) {
             disabled={busy}
           />
           {errors.selling_price && <small className="admin-field-error">{errors.selling_price}</small>}
-        </label>
-      </div>
-
-      <div className="admin-form-row">
-        <label className="admin-field">
-          <span>Reorder level</span>
-          <input
-            type="number"
-            name="minimum_stock"
-            defaultValue={text("minimum_stock")}
-            min={0}
-            step="1"
-            inputMode="numeric"
-            placeholder="0"
-            disabled={busy}
-          />
-          {errors.minimum_stock && <small className="admin-field-error">{errors.minimum_stock}</small>}
         </label>
 
         <label className="admin-field">

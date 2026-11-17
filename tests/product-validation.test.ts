@@ -78,6 +78,37 @@ test("allows a product to keep its own SKU and barcode when editing", () => {
   assert.equal(result.ok, true);
 });
 
+test("preserves stored SKU, barcode, cost and reorder level when the form omits them", () => {
+  // The admin form no longer shows these fields, so an ordinary edit must not
+  // blank the values that were stored before they were hidden.
+  const existing = record({
+    id: "p1",
+    sku: "SKU-1",
+    barcode: "111",
+    purchase_price: 250,
+    minimum_stock: 7
+  });
+  const result = validateProductInput(
+    form({ name: "Renamed", selling_price: "150" }),
+    [existing],
+    "p1"
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.sku, "SKU-1");
+  assert.equal(result.value.barcode, "111");
+  assert.equal(result.value.purchase_price, 250);
+  assert.equal(result.value.minimum_stock, 7);
+});
+
+test("a submitted empty SKU still clears it on edit", () => {
+  const existing = record({ id: "p1", sku: "SKU-1" });
+  const result = validateProductInput(form({ ...valid, sku: "" }), [existing], "p1");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.sku, null);
+});
+
 test("treats empty optional fields as null", () => {
   const result = validateProductInput(
     form({ ...valid, sku: "", barcode: "", category: "", description: "" }),

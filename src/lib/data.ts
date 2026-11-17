@@ -239,6 +239,42 @@ export async function getProductReferenceCounts(
 }
 
 
+export type SellableProductRow = {
+  id: string;
+  name: string;
+  quantity: number;
+};
+
+export type SellablePage = {
+  items: SellableProductRow[];
+  total: number;
+};
+
+/**
+ * A page of products that can be sold right now (active, with sellable stock).
+ *
+ * The sellable figure and the filtering/paging are computed by the
+ * `list_sellable_products` function so the Sold screen and the stock-out
+ * deduction use one definition. Row Level Security still governs what the
+ * caller can read.
+ */
+export async function getSellableProducts(
+  search: string,
+  page: number,
+  pageSize: number
+): Promise<SellablePage> {
+  if (!isSupabaseConfigured) return { items: [], total: 0 };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("list_sellable_products", {
+    p_search: search || null,
+    p_limit: pageSize,
+    p_offset: Math.max(0, page) * pageSize
+  });
+  if (error) throw new Error(`Unable to load sellable products: ${error.message}`);
+  const payload = (data ?? {}) as { items?: SellableProductRow[]; total?: number };
+  return { items: payload.items ?? [], total: Number(payload.total ?? 0) };
+}
+
 export async function getCategories(): Promise<{ id: string; name: string }[]> {
   if (!isSupabaseConfigured) return [];
   const supabase = await createClient();

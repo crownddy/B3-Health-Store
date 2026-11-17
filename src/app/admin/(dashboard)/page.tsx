@@ -6,7 +6,6 @@ import {
   SectionCard,
   EmptyState,
   StatusPill,
-  money,
   formatDate
 } from "@/components/admin/ui";
 
@@ -59,11 +58,6 @@ export default async function AdminOverviewPage({
           hint="Total quantity on hand"
         />
         <StatCard
-          label="Inventory value"
-          value={money(metrics.inventoryValue)}
-          hint="At selling price"
-        />
-        <StatCard
           label="Categories"
           value={String(metrics.totalCategories)}
           hint="Product groupings"
@@ -114,7 +108,6 @@ export default async function AdminOverviewPage({
                     <th>Product</th>
                     <th>Shelf</th>
                     <th className="admin-num">Qty</th>
-                    <th className="admin-num">Min</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -123,7 +116,6 @@ export default async function AdminOverviewPage({
                       <td>{product.name}</td>
                       <td>{product.shelf_number ?? "—"}</td>
                       <td className="admin-num">{product.quantity}</td>
-                      <td className="admin-num">{product.minimum_stock}</td>
                     </tr>
                   ))}
                 </tbody>

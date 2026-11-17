@@ -15,6 +15,8 @@ Mobile-first public product catalogue and inventory-management foundation for B3
 - Multiple expiration-date tracking: every stock receipt is its own batch with
   its own expiry, stock out follows FEFO, and inventory/expiry screens show and
   filter batches by expiration status.
+- Sold screen: search and page through sellable products, record a sale, and
+  deduct stock through the same atomic stock-out function (FEFO, never expired).
 
 ## Run locally
 
@@ -55,6 +57,7 @@ for setup and run instructions.
    - `20261116_product_management.sql`
    - `20261117_multiple_expiration_tracking.sql`
    - `20261117b_atomic_inventory_operations.sql`
+   - `20261117c_sold_screen.sql`
 
 4. In Supabase Authentication, create the first admin user.
 5. In SQL Editor, promote that user (replace the email):
