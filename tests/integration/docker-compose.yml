@@ -1,0 +1,94 @@
+# Local integration stack for the B3 Health Store admin console.
+#
+# Runs the real Supabase service images against a throwaway Postgres so the RLS
+# and browser E2E suites exercise genuine auth, genuine RLS and genuine Storage.
+#
+# Everything here is bound to 127.0.0.1 and uses the local-only JWT secret that
+# scripts/generate-keys.mjs writes to .local-test/keys.env (gitignored). There
+# are no credentials in this file.
+#
+# Start with: npm run test:integration:up
+name: b3-health-store-integration
+
+services:
+  db:
+    image: supabase/postgres:15.8.1.085
+    container_name: b3it-db
+    environment:
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supabase_admin -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  auth:
+    image: supabase/gotrue:v2.177.0
+    container_name: b3it-auth
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: ${LOCAL_SUPABASE_URL:-http://127.0.0.1:54321}
+      GOTRUE_API_EXTERNAL_URL: ${LOCAL_SUPABASE_URL:-http://127.0.0.1:54321}
+      GOTRUE_DB_DRIVER: postgres
+      DATABASE_URL: postgres://supabase_auth_admin:${LOCAL_AUTH_DB_PASSWORD:-authpass}@db:5432/postgres?search_path=auth&sslmode=disable
+      GOTRUE_DB_NAMESPACE: auth
+      GOTRUE_SITE_URL: ${LOCAL_APP_URL:-http://127.0.0.1:12000}
+      GOTRUE_JWT_SECRET: ${LOCAL_JWT_SECRET:?run scripts/generate-keys.mjs first}
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_LOG_LEVEL: warn
+    ports:
+      - "127.0.0.1:9999:9999"
+
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    container_name: b3it-rest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://supabase_admin:${LOCAL_POSTGRES_PASSWORD:-postgres}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${LOCAL_JWT_SECRET:?run scripts/generate-keys.mjs first}
+      PGRST_SERVER_PORT: "3001"
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  storage:
+    image: supabase/storage-api:v1.11.13
+    container_name: b3it-storage
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ANON_KEY: ${LOCAL_ANON_KEY:?run scripts/generate-keys.mjs first}
+      SERVICE_KEY: ${LOCAL_SERVICE_KEY:?run scripts/generate-keys.mjs first}
+      PGRST_JWT_SECRET: ${LOCAL_JWT_SECRET:?run scripts/generate-keys.mjs first}
+      DATABASE_URL: postgres://supabase_storage_admin:${LOCAL_STORAGE_DB_PASSWORD:-storagepass}@db:5432/postgres
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      STORAGE_BACKEND: file
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      PORT: "5000"
+      FILE_SIZE_LIMIT: "52428800"
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - storage-data:/var/lib/storage
+
+volumes:
+  storage-data:

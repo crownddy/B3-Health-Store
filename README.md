@@ -29,6 +29,17 @@ Mobile-first public product catalogue and inventory-management foundation for B3
 
 If Supabase is not configured, the homepage uses clearly-labelled sample/demo products in memory. No demo data is written to a database.
 
+## Tests
+
+```bash
+npm test                     # unit tests (no database needed)
+```
+
+Integration suites run against a real local Supabase stack (Docker). They cover
+RLS/authorization and the admin console in a browser, and they are hard-wired to
+local targets only. See [tests/integration/README.md](tests/integration/README.md)
+for setup and run instructions.
+
 ## Supabase setup
 
 1. Create a Supabase project.
