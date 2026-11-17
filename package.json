@@ -13,6 +13,7 @@
     "test:integration:up": "node tests/integration/scripts/stack.mjs up",
     "test:integration:down": "node tests/integration/scripts/stack.mjs down",
     "test:integration:rls": "node tests/integration/rls.suite.mjs",
+    "test:integration:transactions": "node tests/integration/transactions.suite.mjs",
     "test:integration:e2e": "node tests/integration/scripts/run-e2e.mjs"
   },
   "dependencies": {

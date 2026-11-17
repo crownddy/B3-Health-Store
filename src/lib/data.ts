@@ -47,6 +47,19 @@ export type ExpiringRow = {
   products: { name: string } | { name: string }[] | null;
 };
 
+/** A batch joined to its product, as loaded for the inventory/expiry screens. */
+export type BatchWithProduct = {
+  id: string;
+  product_id: string;
+  batch_number: string | null;
+  production_date: string | null;
+  expiration_date: string | null;
+  quantity_received: number;
+  quantity_remaining: number;
+  created_at: string;
+  products: { name: string } | { name: string }[] | null;
+};
+
 export type ProductRow = {
   id: string;
   name: string;
@@ -195,7 +208,9 @@ export async function getProductBatches(productId: string): Promise<ProductBatch
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("product_batches")
-    .select("id,batch_number,expiration_date,quantity_remaining")
+    .select(
+      "id,batch_number,production_date,expiration_date,quantity_received,quantity_remaining,created_at"
+    )
     .eq("product_id", productId)
     .order("expiration_date", { ascending: true, nullsFirst: false });
   if (error) throw new Error(`Unable to load batches: ${error.message}`);
@@ -255,13 +270,15 @@ export async function getStockMovements(limit = 50): Promise<MovementRow[]> {
   return (data ?? []) as MovementRow[];
 }
 
-export async function getBatches(): Promise<ExpiringRow[]> {
+export async function getBatches(): Promise<BatchWithProduct[]> {
   if (!isSupabaseConfigured) return [];
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("product_batches")
-    .select("id,batch_number,expiration_date,quantity_remaining,products(name)")
+    .select(
+      "id,product_id,batch_number,production_date,expiration_date,quantity_received,quantity_remaining,created_at,products(name)"
+    )
     .order("expiration_date", { ascending: true, nullsFirst: false });
   if (error) throw new Error(`Unable to load batches: ${error.message}`);
-  return (data ?? []) as ExpiringRow[];
+  return (data ?? []) as unknown as BatchWithProduct[];
 }

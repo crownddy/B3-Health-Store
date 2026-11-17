@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { getProductReferenceCounts, getProducts } from "@/lib/data";
-import { validateProductInput, firstError } from "@/lib/products/validation";
+import { validateProductInput, validateInitialStock, firstError } from "@/lib/products/validation";
 import { canDeleteProduct } from "@/lib/products/policy";
 import { describeWriteError } from "@/lib/products/errors";
 import type { ProductActionState } from "@/lib/products/action-state";
@@ -27,6 +27,9 @@ function collectFormValues(formData: FormData): Record<string, string> {
     "minimum_stock",
     "shelf_number",
     "image_url",
+    "initial_quantity",
+    "initial_expiration_date",
+    "initial_batch_number",
     "is_visible_on_homepage",
     "is_featured"
   ];
@@ -53,32 +56,56 @@ export async function createProduct(
   const existing = await getProducts();
 
   const result = validateProductInput(formData, existing, null);
-  if (!result.ok) {
+  const initial = validateInitialStock(formData);
+  if (!result.ok || !initial.ok) {
+    const errors = {
+      ...(result.ok ? {} : result.errors),
+      ...(initial.ok ? {} : initial.errors)
+    };
     return {
       ok: false,
-      message: firstError(result.errors),
-      errors: result.errors,
+      message: firstError(errors),
+      errors,
       values: collectFormValues(formData)
     };
   }
 
+  const opening = initial.value;
   const supabase = await createClient();
-  // quantity is intentionally set to 0: stock is only ever changed through the
-  // stock-movement workflow, never by creating or editing a product.
-  const { data, error } = await supabase
-    .from("products")
-    .insert({ ...result.value, quantity: 0 })
-    .select("id")
-    .maybeSingle();
+  // The product, its opening batch, the matching stock-in movement and the
+  // total quantity are written by one function in a single transaction. Either
+  // all of them are created or none are, so a product can never be left with a
+  // batch but no movement (or a total that disagrees with its batches).
+  const { data, error } = await supabase.rpc("create_product_with_initial_stock", {
+    p_name: result.value.name,
+    p_description: result.value.description,
+    p_category: result.value.category,
+    p_sku: result.value.sku,
+    p_barcode: result.value.barcode,
+    p_image_url: result.value.image_url,
+    p_purchase_price: result.value.purchase_price,
+    p_selling_price: result.value.selling_price,
+    p_minimum_stock: result.value.minimum_stock,
+    p_shelf_number: result.value.shelf_number,
+    p_is_visible_on_homepage: result.value.is_visible_on_homepage,
+    p_is_featured: result.value.is_featured,
+    p_initial_quantity: opening?.quantity ?? 0,
+    p_initial_expiration_date: opening?.expiration_date ?? null,
+    p_initial_batch_number: opening?.batch_number ?? null
+  });
 
   if (error) return { ok: false, message: describeWriteError(error) };
 
+  const productId = (data as { product_id?: string } | null)?.product_id ?? "";
+
   revalidatePath("/admin/products");
   revalidatePath("/admin/inventory");
+  revalidatePath("/admin/stock");
+  revalidatePath("/admin/expiry");
   revalidatePath("/admin");
   revalidatePath("/");
 
-  redirect(`/admin/products/${data?.id ?? ""}?created=1`);
+  redirect(`/admin/products/${productId}?created=1`);
 }
 
 export async function updateProduct(

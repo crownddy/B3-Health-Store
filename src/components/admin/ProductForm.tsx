@@ -26,6 +26,9 @@ type TextField =
   | "shelf_number"
   | "image_url";
 
+/** Opening-stock fields, which only exist on the create form. */
+type InitialStockField = "initial_quantity" | "initial_expiration_date" | "initial_batch_number";
+
 type CheckboxField = "is_visible_on_homepage" | "is_featured";
 
 export default function ProductForm({ mode, product, categories }: Props) {
@@ -51,6 +54,7 @@ export default function ProductForm({ mode, product, categories }: Props) {
     const current = product?.[field];
     return current === null || current === undefined ? "" : String(current);
   };
+  const initialStock = (field: InitialStockField) => echo?.[field] ?? "";
   const checked = (field: CheckboxField) =>
     echo ? echo[field] === "on" : (product?.[field] ?? false);
   // Remount the form when the server echoes values back. React clears
@@ -262,6 +266,59 @@ export default function ProductForm({ mode, product, categories }: Props) {
           </div>
         </div>
       </div>
+
+      {mode === "create" && (
+        <fieldset className="admin-fieldset" disabled={busy}>
+          <legend>Initial stock (optional)</legend>
+          <p className="admin-field-hint">
+            Leave the quantity blank to create the product with no stock. Any quantity is saved as
+            the first batch, with its own expiration date.
+          </p>
+          <div className="admin-form-row">
+            <label className="admin-field">
+              <span>Initial quantity</span>
+              <input
+                type="number"
+                name="initial_quantity"
+                defaultValue={initialStock("initial_quantity")}
+                min={1}
+                step={1}
+                inputMode="numeric"
+                placeholder="e.g. 24"
+              />
+              {errors.initial_quantity && (
+                <small className="admin-field-error">{errors.initial_quantity}</small>
+              )}
+            </label>
+
+            <label className="admin-field">
+              <span>Expiration date</span>
+              <input
+                type="date"
+                name="initial_expiration_date"
+                defaultValue={initialStock("initial_expiration_date")}
+              />
+              {errors.initial_expiration_date && (
+                <small className="admin-field-error">{errors.initial_expiration_date}</small>
+              )}
+            </label>
+          </div>
+
+          <label className="admin-field">
+            <span>Batch number (optional)</span>
+            <input
+              type="text"
+              name="initial_batch_number"
+              defaultValue={initialStock("initial_batch_number")}
+              maxLength={80}
+              placeholder="Generated automatically if left blank"
+            />
+            {errors.initial_batch_number && (
+              <small className="admin-field-error">{errors.initial_batch_number}</small>
+            )}
+          </label>
+        </fieldset>
+      )}
 
       <fieldset className="admin-fieldset" disabled={busy}>
         <legend>Visibility</legend>

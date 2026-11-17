@@ -45,8 +45,23 @@ export type ProductInput = {
 export type ProductBatchSummary = {
   id: string;
   batch_number: string | null;
+  production_date: string | null;
   expiration_date: string | null;
+  quantity_received: number;
   quantity_remaining: number;
+  created_at: string;
+};
+
+/**
+ * Optional opening stock captured on the Add Product form.
+ *
+ * Absent (or a zero quantity) means the product is created with no batch at
+ * all; the initial stock is only turned into a batch when a quantity is given.
+ */
+export type InitialStockInput = {
+  quantity: number;
+  expiration_date: string | null;
+  batch_number: string | null;
 };
 
 export type CatalogQuery = {

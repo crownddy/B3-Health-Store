@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { recordStockMovement, type StockActionState } from "@/app/admin/(dashboard)/stock/actions";
 
 type Option = { id: string; name: string; quantity: number };
@@ -9,6 +9,7 @@ const initialState: StockActionState = { ok: false, message: "" };
 
 export default function StockMovementForm({ products }: { products: Option[] }) {
   const [state, formAction, pending] = useActionState(recordStockMovement, initialState);
+  const [movementType, setMovementType] = useState("stock_in");
 
   return (
     <form action={formAction} className="admin-form">
@@ -38,13 +39,52 @@ export default function StockMovementForm({ products }: { products: Option[] }) 
 
         <label className="admin-field">
           <span>Movement type</span>
-          <select name="movement_type" required defaultValue="stock_in" disabled={pending}>
+          <select
+            name="movement_type"
+            required
+            value={movementType}
+            onChange={(event) => setMovementType(event.target.value)}
+            disabled={pending}
+          >
             <option value="stock_in">Stock in</option>
-            <option value="stock_out">Stock out</option>
+            <option value="stock_out">Stock out (FEFO)</option>
             <option value="adjustment">Adjustment (set exact quantity)</option>
           </select>
         </label>
       </div>
+
+      {movementType === "stock_in" && (
+        <div className="admin-form-row">
+          <label className="admin-field">
+            <span>Expiration date</span>
+            <input type="date" name="expiration_date" disabled={pending} />
+            <small className="admin-field-hint">
+              Each receipt keeps its own expiry. Leave blank if the batch has no expiry date.
+            </small>
+          </label>
+
+          <label className="admin-field">
+            <span>Batch number (optional)</span>
+            <input
+              type="text"
+              name="batch_number"
+              maxLength={80}
+              placeholder="Generated automatically if left blank"
+              disabled={pending}
+            />
+            <small className="admin-field-hint">
+              Receiving the same batch number with the same expiry tops up that batch.
+            </small>
+          </label>
+        </div>
+      )}
+
+      {movementType === "stock_out" && (
+        <p className="admin-note" role="status">
+          Stock out follows FEFO: units are taken from the batch expiring soonest first, spanning
+          several batches when needed. Expired batches are never sold.
+        </p>
+      )}
 
       <div className="admin-form-row">
         <label className="admin-field">

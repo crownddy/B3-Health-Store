@@ -12,6 +12,9 @@ Mobile-first public product catalogue and inventory-management foundation for B3
 - Supabase SQL schema for products, categories, batches, stock movements and Super Admin role.
 - Public homepage visibility control (`is_visible_on_homepage`).
 - Product fields for purchase/selling price, stock, shelf number and batch production/expiry dates.
+- Multiple expiration-date tracking: every stock receipt is its own batch with
+  its own expiry, stock out follows FEFO, and inventory/expiry screens show and
+  filter batches by expiration status.
 
 ## Run locally
 
@@ -44,8 +47,17 @@ for setup and run instructions.
 
 1. Create a Supabase project.
 2. Open SQL Editor and run `supabase/schema.sql`.
-3. In Supabase Authentication, create the first admin user.
-4. In SQL Editor, promote that user (replace the email):
+3. If the project already has data, run the additive, idempotent migrations in
+   `supabase/migrations/` in filename order. They are safe to re-run and never
+   drop or rewrite existing products, batches or policies. In the SQL Editor,
+   paste each file in turn:
+
+   - `20261116_product_management.sql`
+   - `20261117_multiple_expiration_tracking.sql`
+   - `20261117b_atomic_inventory_operations.sql`
+
+4. In Supabase Authentication, create the first admin user.
+5. In SQL Editor, promote that user (replace the email):
 
    ```sql
    insert into public.profiles (id, full_name, role)

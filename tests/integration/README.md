@@ -4,11 +4,12 @@ These suites exercise product management against a **real local Supabase stack**
 real GoTrue auth, real PostgREST requests, real Postgres RLS and real Storage.
 They are the layer that unit tests cannot cover.
 
-Two suites live here:
+Three suites live here:
 
 | Suite | File | What it checks |
 |---|---|---|
 | RLS / authorization | `rls.suite.mjs` | Every read/write policy for products and profiles |
+| Atomicity / concurrency | `transactions.suite.mjs` | The inventory RPCs commit all-or-nothing, failed operations leave no trace, FEFO spans batches, and concurrent stock-outs cannot oversell |
 | Browser E2E | `e2e.suite.mjs` | The admin console UI end to end in a real browser |
 
 ## Safety: local only
@@ -44,7 +45,10 @@ npm test
 # 3. RLS / authorization suite
 npm run test:integration:rls
 
-# 4. Browser E2E suite (starts and stops the app itself)
+# 4. Atomicity / concurrency suite
+npm run test:integration:transactions
+
+# 5. Browser E2E suite (starts and stops the app itself)
 npm run build
 npm run test:integration:e2e
 ```
@@ -60,9 +64,9 @@ runs `next start`.
    a fixed local JWT secret and freshly signed anon/service keys.
 2. `scripts/stack.mjs up` — starts Postgres, waits for it, sets the auth/storage
    database role passwords, then starts auth, rest and storage.
-3. `scripts/bootstrap.mjs` — applies `supabase/schema.sql` and
-   `supabase/migrations/20261116_product_management.sql`, grants the API roles
-   access, creates the two test accounts and seeds a small catalogue.
+3. `scripts/bootstrap.mjs` — applies `supabase/schema.sql` and every file in
+   `supabase/migrations/` (in order), grants the API roles access, creates the
+   two test accounts and seeds a small catalogue.
 
 It is idempotent, so re-running is safe.
 

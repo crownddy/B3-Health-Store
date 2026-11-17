@@ -25,5 +25,13 @@ export function describeWriteError(error: SupabaseError): string {
     return "One of the values is outside the allowed range.";
   }
 
+  // Raised by the inventory functions when the caller is not allowed to write.
+  if (error.code === "42501") {
+    return "You do not have permission to change stock.";
+  }
+  if (error.code === "28000") {
+    return "Your session has expired. Please sign in again.";
+  }
+
   return error.message ?? "The change could not be saved.";
 }
