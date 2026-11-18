@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { getProductReferenceCounts } from "@/lib/data";
-import { canDeleteProduct } from "@/lib/products/policy";
+import { deleteProductSafely } from "@/lib/products/delete";
 import { describeWriteError } from "@/lib/products/errors";
 import { normalizeDateString } from "@/lib/products/batches";
 import type { InventoryActionState } from "@/lib/products/inventory-action-state";
@@ -22,16 +22,16 @@ function refreshPaths(productId?: string): void {
 }
 
 /**
- * Permanently deletes a product from the Inventory list.
+ * Removes a product from the Inventory list.
  *
  * Authorization is enforced twice, independently: requireSuperAdmin() checks the
- * signed-in role, and Row Level Security independently refuses the delete for
+ * signed-in role, and Row Level Security independently refuses the write for
  * anyone else, so a forged request cannot bypass either check. Staff never
  * reach this code path.
  *
- * History is never sacrificed to make a delete succeed: a product with batches
- * or stock movements is refused (and the database's ON DELETE RESTRICT would
- * refuse it anyway). The caller is told to archive instead.
+ * Deletion always succeeds. A product with no history is hard deleted; a product
+ * with batches or stock movements is soft deleted (hidden from every active
+ * screen) so its history is preserved — never cascade-deleted.
  */
 export async function deleteInventoryProduct(
   _prev: InventoryActionState | undefined,
@@ -43,58 +43,12 @@ export async function deleteInventoryProduct(
   if (!id) return { ok: false, message: "Missing product." };
 
   const references = await getProductReferenceCounts(id);
-  const decision = canDeleteProduct(references);
-  if (!decision.allowed) {
-    return { ok: false, blocked: true, message: decision.reason };
-  }
-
   const supabase = await createClient();
-  const { error } = await supabase.from("products").delete().eq("id", id);
-  if (error) {
-    // 23503 means a foreign key still references the row — treat it as a
-    // history block rather than a raw failure.
-    return { ok: false, blocked: error.code === "23503", message: describeWriteError(error) };
-  }
+  const outcome = await deleteProductSafely(supabase, id, references);
+  if (!outcome.ok) return { ok: false, message: outcome.message };
 
   refreshPaths(id);
   redirect("/admin/inventory?deleted=1");
-}
-
-/**
- * Archives (or restores) a product from the Inventory list.
- *
- * Offered when a delete is blocked so discontinued products can be taken out of
- * the catalogue without destroying their batch and movement history. Archiving
- * also hides the product from the storefront. Super Admin only, enforced here
- * and by RLS.
- */
-export async function archiveInventoryProduct(
-  _prev: InventoryActionState | undefined,
-  formData: FormData
-): Promise<InventoryActionState> {
-  await requireSuperAdmin();
-
-  const id = String(formData.get("id") ?? "").trim();
-  const restore = String(formData.get("restore") ?? "") === "1";
-  if (!id) return { ok: false, message: "Missing product." };
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("products")
-    .update({
-      status: restore ? "active" : "archived",
-      ...(restore ? {} : { is_visible_on_homepage: false }),
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", id);
-
-  if (error) return { ok: false, message: describeWriteError(error) };
-
-  refreshPaths(id);
-  return {
-    ok: true,
-    message: restore ? "Product restored to the active catalogue." : "Product archived."
-  };
 }
 
 /**

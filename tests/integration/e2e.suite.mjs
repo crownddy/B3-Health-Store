@@ -62,11 +62,12 @@ function cleanup() {
     'Zinc E2E 50mg', 'Zinc E2E 50mg (updated)', 'Image Test Product',
     'FEFO Milk E2E', 'No Stock E2E', 'Sold E2E Product',
     'Inv Valid E2E', 'Inv Nodate E2E', 'Inv Expired E2E',
-    'Inv Keep E2E', 'Inv Delete E2E'
+    'Inv Keep E2E', 'Inv Delete E2E', 'Inv Hidden E2E'
   )`;
   const products = `select id from public.products where name in ${names} or name like 'Page E2E%'`;
   // Movements and batches reference products with ON DELETE RESTRICT, so they
-  // must go first (in that order) before the products themselves.
+  // must go first (in that order) before the products themselves. Deleted
+  // products are matched by name too, so soft-deleted rows are cleaned up.
   psql(`delete from public.stock_movements where product_id in (${products})`);
   psql(`delete from public.product_batches where product_id in (${products})`);
   psql(`delete from public.products where name in ${names} or name like 'Page E2E%'`);
@@ -158,7 +159,7 @@ try {
   // --- 8. Delete (no history) ----------------------------------------------
   await page.goto(`${config.appUrl}/admin/products/${productId}`, { waitUntil: "networkidle" });
   acceptNextDialog(page);
-  await page.click('button:has-text("Delete permanently")');
+  await page.click('button:has-text("Delete product")');
   await page.waitForURL("**/admin/products?deleted=1", { timeout: 20000 });
   body = await page.innerText("body");
   ok("delete: success banner", body.includes("Product deleted."));
@@ -185,13 +186,36 @@ try {
   const imageProductId = page.url().split("/admin/products/")[1].split("?")[0];
   ok("image: product created with an image", (await page.innerText("body")).includes("Image Test Product"));
 
-  // --- 10. Delete blocked when history exists ------------------------------
+  // The image is shown on the inventory details page too.
+  await page.goto(`${config.appUrl}/admin/inventory/${imageProductId}`, { waitUntil: "networkidle" });
+  ok("details: shows the product image when one exists", (await page.locator(".admin-detail-image img").count()) === 1);
+
+  // --- 10. Delete a product that has history -------------------------------
+  // A product with stock movements can now be deleted: it is removed from the
+  // catalogue while its history stays in the database. The confirmation dialog
+  // is shown, and no name typing is required.
   psql(`insert into public.stock_movements (product_id, movement_type, quantity, note) values ('${imageProductId}','stock_in',5,'e2e suite')`);
   await page.goto(`${config.appUrl}/admin/products/${imageProductId}`, { waitUntil: "networkidle" });
   body = await page.innerText("body");
-  ok("delete-blocked: button hidden with history", (await page.locator('button:has-text("Delete permanently")').count()) === 0);
-  ok("delete-blocked: reason shown", body.toLowerCase().includes("history"));
-  ok("delete-blocked: archive still offered", body.includes("Archive product") || body.includes("Restore product"));
+  ok("delete-with-history: button is offered", (await page.locator('button:has-text("Delete product")').count()) === 1);
+  acceptNextDialog(page);
+  await page.click('button:has-text("Delete product")');
+  await page.waitForURL("**/admin/products?deleted=1", { timeout: 20000 });
+  body = await page.innerText("body");
+  ok("delete-with-history: success banner", body.includes("Product deleted."));
+  ok("delete-with-history: gone from the catalogue", !body.includes("Image Test Product"));
+  ok(
+    "delete-with-history: row is soft deleted, not removed",
+    psql(`select (deleted_at is not null)::text from public.products where id='${imageProductId}'`) === "true"
+  );
+  ok(
+    "delete-with-history: movement history intact",
+    psql(`select count(*) from public.stock_movements where product_id='${imageProductId}'`) === "1"
+  );
+  ok(
+    "delete-with-history: hidden from the inventory list",
+    psql(`select count(*) from public.products where id='${imageProductId}' and deleted_at is null`) === "0"
+  );
 
   // --- 11. Initial stock on product creation ------------------------------
   await page.goto(`${config.appUrl}/admin/products/new`, { waitUntil: "networkidle" });
@@ -462,8 +486,7 @@ try {
   ok("details: has a way back to inventory", (await page.locator('a:has-text("Back to inventory")').count()) === 1);
 
   // A product with an image shows it on the details page.
-  await page.goto(`${config.appUrl}/admin/inventory/${imageProductId}`, { waitUntil: "networkidle" });
-  ok("details: shows the product image when one exists", (await page.locator(".admin-detail-image img").count()) === 1);
+  // (Checked in section 9, before the product is deleted.)
 
   // Editing a batch's expiry changes only the date, never the quantity.
   await page.goto(`${config.appUrl}/admin/inventory/${validId}`, { waitUntil: "networkidle" });
@@ -484,7 +507,7 @@ try {
   );
 
   // --- 17e. Delete from the inventory list ---------------------------------
-  // A product with no history can be deleted, after a confirmation dialog.
+  // A product with no history is deleted outright, after a simple confirmation.
   const deletableId = await createWithStock("Inv Delete E2E", 0, "", "");
   await page.goto(`${config.appUrl}/admin/inventory?q=Inv+Delete+E2E`, { waitUntil: "networkidle" });
   await page.click('button.admin-button-danger:has-text("Delete")');
@@ -492,36 +515,57 @@ try {
   body = await page.innerText("body");
   ok("delete: confirmation dialog names the product", body.includes("Inv Delete E2E"));
   ok(
-    "delete: confirm button disabled until the name is typed",
-    await page.locator('.admin-modal button:has-text("Delete permanently")').isDisabled()
+    "delete: confirm button is enabled without typing the name",
+    !(await page.locator('.admin-modal button:has-text("Delete")').last().isDisabled())
   );
-  await page.fill(".admin-modal-input", "Inv Delete E2E");
-  await page.click('.admin-modal button:has-text("Delete permanently")');
+  ok("delete: no name-typing field is required", (await page.locator(".admin-modal-input").count()) === 0);
+  await page.click('.admin-modal button:has-text("Delete")');
   await page.waitForURL("**/admin/inventory?deleted=1", { timeout: 20000 });
   ok("delete: product removed", psql(`select count(*) from public.products where id='${deletableId}'`) === "0");
 
-  // A product with history cannot be deleted; the dialog explains and offers
-  // archiving, and the history survives.
+  // A product with history is also deletable from the list: it is soft deleted,
+  // its history survives, and no name typing is needed.
   const keepId = await createWithStock("Inv Keep E2E", 3, daysFromNow(300), "INV-KEEP");
   await page.goto(`${config.appUrl}/admin/inventory?q=Inv+Keep+E2E`, { waitUntil: "networkidle" });
   await page.click('button.admin-button-danger:has-text("Delete")');
   await page.waitForSelector(".admin-modal", { timeout: 20000 });
-  await page.fill(".admin-modal-input", "Inv Keep E2E");
-  await page.click('.admin-modal button:has-text("Delete permanently")');
-  await page.waitForSelector(".admin-modal .admin-alert-error", { timeout: 20000 });
+  await page.click('.admin-modal button:has-text("Delete")');
+  await page.waitForURL("**/admin/inventory?deleted=1", { timeout: 20000 });
   body = await page.innerText("body");
-  ok("delete-blocked: explains the history block", /history|batch|movement/i.test(body));
-  ok("delete-blocked: offers archiving", (await page.locator('.admin-modal button:has-text("Archive product")').count()) === 1);
-  ok("delete-blocked: product still present", psql(`select count(*) from public.products where id='${keepId}'`) === "1");
-  ok("delete-blocked: batch history intact", psql(`select count(*) from public.product_batches where product_id='${keepId}'`) === "1");
-  ok("delete-blocked: movement history intact", psql(`select count(*) from public.stock_movements where product_id='${keepId}'`) === "1");
+  ok("delete-with-history: success banner", body.includes("Product deleted."));
+  ok(
+    "delete-with-history: row is soft deleted, not removed",
+    psql(`select (deleted_at is not null)::text from public.products where id='${keepId}'`) === "true"
+  );
+  ok(
+    "delete-with-history: hidden from the inventory list",
+    psql(`select count(*) from public.products where id='${keepId}' and deleted_at is null`) === "0"
+  );
+  ok("delete-with-history: batch history intact", psql(`select count(*) from public.product_batches where product_id='${keepId}'`) === "1");
+  ok("delete-with-history: movement history intact", psql(`select count(*) from public.stock_movements where product_id='${keepId}'`) === "1");
 
-  // Archiving from the same dialog works and keeps the history. A successful
-  // archive closes the dialog, so wait for it to disappear, then check the DB.
-  await page.click('.admin-modal button:has-text("Archive product")');
-  await page.waitForSelector(".admin-modal", { state: "hidden", timeout: 20000 });
-  ok("archive: product archived", psql(`select status from public.products where id='${keepId}'`) === "archived");
-  ok("archive: movement history preserved", psql(`select count(*) from public.stock_movements where product_id='${keepId}'`) === "1");
+  // A deleted product is removed from the stock and sales selections too, so it
+  // can never be restocked or sold by accident. Its history stays in the DB.
+  const hiddenId = await createWithStock("Inv Hidden E2E", 2, daysFromNow(300), "INV-HIDDEN");
+  await page.goto(`${config.appUrl}/admin/inventory?q=Inv+Hidden+E2E`, { waitUntil: "networkidle" });
+  await page.click('button.admin-button-danger:has-text("Delete")');
+  await page.waitForSelector(".admin-modal", { timeout: 20000 });
+  await page.click('.admin-modal button:has-text("Delete")');
+  await page.waitForURL("**/admin/inventory?deleted=1", { timeout: 20000 });
+  await page.goto(`${config.appUrl}/admin/stock`, { waitUntil: "networkidle" });
+  ok(
+    "deleted: excluded from the Stock In / Out product list",
+    (await page.locator(`select[name="product_id"] option[value="${hiddenId}"]`).count()) === 0
+  );
+  await page.goto(`${config.appUrl}/admin/sold`, { waitUntil: "networkidle" });
+  ok(
+    "deleted: excluded from the Sold product list",
+    !(await page.innerText("body")).includes("Inv Hidden E2E")
+  );
+  ok(
+    "deleted: history preserved in the database",
+    psql(`select count(*) from public.product_batches where product_id='${hiddenId}'`) === "1"
+  );
 
   // --- 17f. Mobile: 16px inputs so iOS does not zoom on focus --------------
   await page.setViewportSize({ width: 390, height: 844 });
@@ -548,7 +592,7 @@ try {
   ok("staff: no add-product button", (await page.locator('a:has-text("+ Add product")').count()) === 0);
   await page.goto(`${config.appUrl}/admin/products/new`, { waitUntil: "networkidle" });
   ok("staff: cannot open the create form", !(await page.innerText("body")).includes("Create product"));
-  await page.goto(`${config.appUrl}/admin/products/${imageProductId}`, { waitUntil: "networkidle" });
+  await page.goto(`${config.appUrl}/admin/products/${validId}`, { waitUntil: "networkidle" });
   ok("staff: no lifecycle actions on the detail page", (await page.locator('button:has-text("Archive product")').count()) === 0);
   await page.goto(`${config.appUrl}/admin/inventory`, { waitUntil: "networkidle" });
   ok("staff: can view batches", (await page.innerText("body")).includes("MILK-A"));

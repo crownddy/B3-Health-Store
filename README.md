@@ -66,6 +66,7 @@ for setup and run instructions.
    - `20261117c_sold_screen.sql`
    - `20261118_inventory_improvements.sql`
    - `20261119_inventory_query_pushdown.sql`
+   - `20261120_product_soft_delete.sql`
 
 4. In Supabase Authentication, create the first admin user.
 5. In SQL Editor, promote that user (replace the email):

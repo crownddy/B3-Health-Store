@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
-import { getProduct, getProductBatches, getProductReferenceCounts } from "@/lib/data";
+import { getProduct, getProductBatches } from "@/lib/data";
 import { SectionCard, EmptyState, StatusPill, StatCard, money, formatDate } from "@/components/admin/ui";
 import ProductActions from "@/components/admin/ProductActions";
 import BatchTable from "@/components/admin/BatchTable";
 import { stockStatus } from "@/lib/products/stock";
-import { canDeleteProduct } from "@/lib/products/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +24,8 @@ export default async function ProductDetailPage({
   const product = await getProduct(id);
   if (!product) notFound();
 
-  const [batches, references] = await Promise.all([
-    getProductBatches(id),
-    getProductReferenceCounts(id)
-  ]);
+  const batches = await getProductBatches(id);
 
-  const decision = canDeleteProduct(references);
   const stock = stockStatus(product.quantity, product.minimum_stock);
 
   return (
@@ -174,14 +169,9 @@ export default async function ProductDetailPage({
       {isSuperAdmin && (
         <SectionCard
           title="Lifecycle"
-          description="Archive discontinued products to keep their history. Deletion is blocked when history exists."
+          description="Archive a discontinued product to keep it in the catalogue, or delete it to remove it from the catalogue. Either way, batches and stock-movement history are preserved."
         >
-          <ProductActions
-            id={product.id}
-            status={product.status}
-            canDelete={decision.allowed}
-            deleteBlockedReason={decision.allowed ? null : decision.reason}
-          />
+          <ProductActions id={product.id} status={product.status} />
         </SectionCard>
       )}
 
