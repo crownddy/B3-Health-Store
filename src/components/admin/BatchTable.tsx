@@ -1,24 +1,9 @@
 import { formatDate } from "@/lib/format";
-import { StatusPill } from "@/components/admin/ui";
-import {
-  EXPIRY_LABEL,
-  classifyExpiry,
-  expiryDetail,
-  type ExpiryStatus
-} from "@/lib/products/batches";
+import { expiryDetail } from "@/lib/products/batches";
+import { BatchExpiryPill } from "@/components/admin/ExpiryPill";
+import BatchExpiryEditor from "@/components/admin/BatchExpiryEditor";
 
-const TONE: Record<ExpiryStatus, "good" | "warn" | "danger" | "muted"> = {
-  expired: "danger",
-  expiring_soon: "warn",
-  valid: "good",
-  no_date: "muted"
-};
-
-/** Status pill for a batch's expiration date, shared by the batch tables. */
-export function BatchExpiryPill({ expirationDate }: { expirationDate: string | null }) {
-  const status = classifyExpiry(expirationDate);
-  return <StatusPill tone={TONE[status]}>{EXPIRY_LABEL[status]}</StatusPill>;
-}
+export { BatchExpiryPill } from "@/components/admin/ExpiryPill";
 
 export type BatchTableRow = {
   id: string;
@@ -32,13 +17,19 @@ export type BatchTableRow = {
  * Renders a product's (or the store's) batches with batch number, available
  * quantity and expiration date, and clearly marks expired / expiring-soon /
  * valid batches.
+ *
+ * When `editableProductId` is given (a Super Admin viewing one product's
+ * batches), each row gets a control to set that batch's expiration date. The
+ * control writes only the expiration date, never a quantity.
  */
 export default function BatchTable({
   rows,
-  showProduct = false
+  showProduct = false,
+  editableProductId
 }: {
   rows: BatchTableRow[];
   showProduct?: boolean;
+  editableProductId?: string;
 }) {
   return (
     <div className="admin-table-wrap">
@@ -51,6 +42,7 @@ export default function BatchTable({
             <th>Detail</th>
             <th className="admin-num">Available</th>
             <th>Status</th>
+            {editableProductId && <th>Set expiry</th>}
           </tr>
         </thead>
         <tbody>
@@ -64,6 +56,15 @@ export default function BatchTable({
               <td>
                 <BatchExpiryPill expirationDate={row.expiration_date} />
               </td>
+              {editableProductId && (
+                <td>
+                  <BatchExpiryEditor
+                    batchId={row.id}
+                    productId={editableProductId}
+                    expirationDate={row.expiration_date}
+                  />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

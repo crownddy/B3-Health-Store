@@ -1,11 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  EXPIRING_SOON_DAYS,
+  EXPIRING_SOON_LABEL,
   classifyExpiry,
   daysUntilDate,
   expiryDetail,
   filterBatchesByExpiry,
-  normalizeDateString
+  normalizeDateString,
+  productExpiryStatus
 } from "../src/lib/products/batches.ts";
 
 const TODAY = new Date("2026-06-15T09:00:00Z");
@@ -25,16 +28,22 @@ test("classifyExpiry marks past dates expired", () => {
   assert.equal(classifyExpiry("2020-01-01", TODAY), "expired");
 });
 
-test("classifyExpiry marks today and the next 30 days as expiring soon", () => {
+test("classifyExpiry marks today and the next 120 days as expiring soon", () => {
   assert.equal(classifyExpiry("2026-06-15", TODAY), "expiring_soon");
-  assert.equal(classifyExpiry("2026-07-15", TODAY), "expiring_soon");
+  assert.equal(classifyExpiry("2026-10-12", TODAY), "expiring_soon"); // 119 days
+  assert.equal(classifyExpiry("2026-10-13", TODAY), "expiring_soon"); // exactly 120
 });
 
 test("classifyExpiry marks later dates valid and missing dates as no_date", () => {
-  assert.equal(classifyExpiry("2026-07-16", TODAY), "valid");
+  assert.equal(classifyExpiry("2026-10-14", TODAY), "valid"); // 121 days
   assert.equal(classifyExpiry("2027-01-01", TODAY), "valid");
   assert.equal(classifyExpiry(null, TODAY), "no_date");
   assert.equal(classifyExpiry("", TODAY), "no_date");
+});
+
+test("the warning window is four months", () => {
+  assert.equal(EXPIRING_SOON_DAYS, 120);
+  assert.match(EXPIRING_SOON_LABEL, /4 months/);
 });
 
 test("expiryDetail describes each state in words", () => {
@@ -77,4 +86,39 @@ test("normalizeDateString keeps valid dates and rejects junk", () => {
   assert.equal(normalizeDateString(""), null);
   assert.equal(normalizeDateString(null), null);
   assert.equal(normalizeDateString("nonsense"), null);
+});
+
+// --- Product-level expiry summary -----------------------------------------
+test("productExpiryStatus is no_date when there are no batches", () => {
+  assert.equal(productExpiryStatus([], TODAY), "no_date");
+});
+
+test("productExpiryStatus ignores batches with no stock left", () => {
+  const batches = [
+    { expiration_date: "2026-06-01", quantity_remaining: 0 }, // expired but empty
+    { expiration_date: "2027-01-01", quantity_remaining: 5 }
+  ];
+  assert.equal(productExpiryStatus(batches, TODAY), "valid");
+});
+
+test("productExpiryStatus reports the most urgent status", () => {
+  const batches = [
+    { expiration_date: "2027-01-01", quantity_remaining: 5 },
+    { expiration_date: "2026-06-01", quantity_remaining: 2 }
+  ];
+  assert.equal(productExpiryStatus(batches, TODAY), "expired");
+
+  const soon = [
+    { expiration_date: "2027-01-01", quantity_remaining: 5 },
+    { expiration_date: "2026-07-01", quantity_remaining: 2 }
+  ];
+  assert.equal(productExpiryStatus(soon, TODAY), "expiring_soon");
+});
+
+test("productExpiryStatus is no_date when every in-stock batch lacks a date", () => {
+  const batches = [
+    { expiration_date: null, quantity_remaining: 4 },
+    { expiration_date: null, quantity_remaining: 1 }
+  ];
+  assert.equal(productExpiryStatus(batches, TODAY), "no_date");
 });

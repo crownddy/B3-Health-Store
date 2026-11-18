@@ -13,8 +13,16 @@
  * batch a unit came from, and the whole operation stays atomic.
  */
 
-/** A batch expiring within this many days is flagged as "expiring soon". */
-export const EXPIRING_SOON_DAYS = 30;
+/**
+ * A batch expiring within this many days is flagged as "expiring soon".
+ *
+ * The store's warning window is four months (~120 days): anything expiring
+ * inside it needs to be sold or rotated before it goes off.
+ */
+export const EXPIRING_SOON_DAYS = 120;
+
+/** Human wording for the warning window, derived so it never drifts from the value. */
+export const EXPIRING_SOON_LABEL = `4 months (${EXPIRING_SOON_DAYS} days)`;
 
 export type ExpiryStatus = "expired" | "expiring_soon" | "valid" | "no_date";
 
@@ -98,4 +106,39 @@ export function normalizeDateString(value: string | null | undefined): string | 
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** A batch reduced to the fields the product-level expiry summary needs. */
+export type ExpirySummaryBatch = {
+  expiration_date: string | null;
+  quantity_remaining: number;
+};
+
+const URGENCY: Record<ExpiryStatus, number> = {
+  expired: 3,
+  expiring_soon: 2,
+  valid: 1,
+  no_date: 0
+};
+
+/**
+ * Reduces a product's batches to a single expiration status.
+ *
+ * Only batches that still hold stock count — an emptied batch is history, not a
+ * current risk. The most urgent status wins, so a product with one expired
+ * batch and one valid batch reads as expired. A product whose batches all carry
+ * no expiry date (or that has no batches at all) is "no_date".
+ */
+export function productExpiryStatus(
+  batches: ExpirySummaryBatch[],
+  today: Date = new Date(),
+  soonDays: number = EXPIRING_SOON_DAYS
+): ExpiryStatus {
+  let worst: ExpiryStatus = "no_date";
+  for (const batch of batches) {
+    if (batch.quantity_remaining <= 0) continue;
+    const status = classifyExpiry(batch.expiration_date, today, soonDays);
+    if (URGENCY[status] > URGENCY[worst]) worst = status;
+  }
+  return worst;
 }

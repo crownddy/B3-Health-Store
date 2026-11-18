@@ -17,6 +17,12 @@ Mobile-first public product catalogue and inventory-management foundation for B3
   filter batches by expiration status.
 - Sold screen: search and page through sellable products, record a sale, and
   deduct stock through the same atomic stock-out function (FEFO, never expired).
+- Inventory management: a searchable, expiration-filtered, paged list with
+  product thumbnails, a per-product batch and movement-history detail page, an
+  expiry editor for individual batches, and Super-Admin delete/archive with
+  history-preserving guards. The expiry warning window is four months. Search,
+  expiration filtering and pagination run in the database
+  (`list_inventory_products`), so only the requested page of products is loaded.
 
 ## Run locally
 
@@ -58,6 +64,8 @@ for setup and run instructions.
    - `20261117_multiple_expiration_tracking.sql`
    - `20261117b_atomic_inventory_operations.sql`
    - `20261117c_sold_screen.sql`
+   - `20261118_inventory_improvements.sql`
+   - `20261119_inventory_query_pushdown.sql`
 
 4. In Supabase Authentication, create the first admin user.
 5. In SQL Editor, promote that user (replace the email):

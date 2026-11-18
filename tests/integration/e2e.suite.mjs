@@ -58,18 +58,18 @@ function daysFromNow(days) {
 function cleanup() {
   // Products are identified by name: SKU and barcode are no longer entered
   // through the admin UI.
-  const products = `select id from public.products where name in (
+  const names = `(
     'Zinc E2E 50mg', 'Zinc E2E 50mg (updated)', 'Image Test Product',
-    'FEFO Milk E2E', 'No Stock E2E', 'Sold E2E Product'
+    'FEFO Milk E2E', 'No Stock E2E', 'Sold E2E Product',
+    'Inv Valid E2E', 'Inv Nodate E2E', 'Inv Expired E2E',
+    'Inv Keep E2E', 'Inv Delete E2E'
   )`;
+  const products = `select id from public.products where name in ${names} or name like 'Page E2E%'`;
   // Movements and batches reference products with ON DELETE RESTRICT, so they
   // must go first (in that order) before the products themselves.
   psql(`delete from public.stock_movements where product_id in (${products})`);
   psql(`delete from public.product_batches where product_id in (${products})`);
-  psql(`delete from public.products where name in (
-    'Zinc E2E 50mg', 'Zinc E2E 50mg (updated)', 'Image Test Product',
-    'FEFO Milk E2E', 'No Stock E2E', 'Sold E2E Product'
-  )`);
+  psql(`delete from public.products where name in ${names} or name like 'Page E2E%'`);
 }
 
 const browser = await chromium.launch();
@@ -214,7 +214,12 @@ try {
     "initial stock: opening movement recorded",
     psql(`select count(*) from public.stock_movements where product_id='${fefoProductId}' and movement_type='stock_in'`) === "1"
   );
-  ok("initial stock: batch shown on the detail page", body.includes("MILK-A") && body.includes("Valid"));
+  // 90 days is inside the four-month warning window, so the batch reads as
+  // "Expiring soon" rather than "Valid".
+  ok(
+    "initial stock: batch shown on the detail page",
+    body.includes("MILK-A") && body.includes("Expiring soon")
+  );
 
   // --- 12. Create without initial stock ------------------------------------
   await page.goto(`${config.appUrl}/admin/products/new`, { waitUntil: "networkidle" });
@@ -385,6 +390,156 @@ try {
     "sold: the sale is a stock-out, not a new mechanism",
     psql(`select count(*) from public.stock_movements where product_id='${soldId}' and movement_type='stock_out' and note='Sale'`) === "2"
   );
+
+  // --- 17c. Inventory list: thumbnails, search, expiry, pagination ---------
+  // A product with a far-out expiry (valid) and a product with no expiry date,
+  // both with an opening batch, plus a dedicated product with stock history for
+  // the delete-block path.
+  async function createWithStock(name, quantity, expiration, batchNumber) {
+    await page.goto(`${config.appUrl}/admin/products/new`, { waitUntil: "networkidle" });
+    await page.fill('input[name="name"]', name);
+    await page.fill('input[name="selling_price"]', "100");
+    // Quantity is only filled when positive: the field's min is 1, so 0 would
+    // trip native form validation. Blank means "create with no batch".
+    if (quantity > 0) await page.fill('input[name="initial_quantity"]', String(quantity));
+    if (expiration) await page.fill('input[name="initial_expiration_date"]', expiration);
+    if (batchNumber) await page.fill('input[name="initial_batch_number"]', batchNumber);
+    await page.click('button[type="submit"]');
+    await page.waitForURL("**/admin/products/*?created=1", { timeout: 20000 });
+    return page.url().split("/admin/products/")[1].split("?")[0];
+  }
+
+  const validId = await createWithStock("Inv Valid E2E", 7, daysFromNow(300), "INV-VALID");
+  const nodateId = await createWithStock("Inv Nodate E2E", 4, "", "INV-NODATE");
+
+  await page.goto(`${config.appUrl}/admin/inventory`, { waitUntil: "networkidle" });
+  body = await page.innerText("body");
+  ok("inventory: product list shows the product", body.includes("Inv Valid E2E"));
+  ok("inventory: shows available quantity", body.includes("7"));
+  ok("inventory: shows a placeholder thumbnail without an image", (await page.locator(".admin-thumb-placeholder").count()) >= 1);
+  ok("inventory: shows expiration status", /Valid|No date/.test(body));
+  ok("inventory: has a View details action", (await page.locator('a:has-text("View details")').count()) >= 1);
+
+  // Search by name narrows the list.
+  await page.goto(`${config.appUrl}/admin/inventory?q=Inv+Valid+E2E`, { waitUntil: "networkidle" });
+  body = await page.innerText("body");
+  ok("inventory search: finds the product", body.includes("Inv Valid E2E"));
+  ok("inventory search: hides unrelated products", !body.includes("No Stock E2E"));
+
+  // Empty state when nothing matches.
+  await page.goto(`${config.appUrl}/admin/inventory?q=zzz-no-match-zzz`, { waitUntil: "networkidle" });
+  ok("inventory search: empty state", (await page.innerText("body")).includes("No products match your filters"));
+
+  // Expiry filter.
+  await page.goto(`${config.appUrl}/admin/inventory?expiry=no_date`, { waitUntil: "networkidle" });
+  body = await page.innerText("body");
+  ok("inventory filter: no_date keeps the undated product", body.includes("Inv Nodate E2E"));
+  ok("inventory filter: no_date hides the valid product", !body.includes("Inv Valid E2E"));
+
+  // Pagination: create enough matching products to spill past one page.
+  for (let i = 1; i <= 11; i++) {
+    await createWithStock(`Page E2E ${String(i).padStart(2, "0")}`, 1, daysFromNow(200), `PAGE-${i}`);
+  }
+  await page.goto(`${config.appUrl}/admin/inventory?q=Page+E2E`, { waitUntil: "networkidle" });
+  body = await page.innerText("body");
+  ok("inventory pagination: first page shown", body.includes("Page 1 of 2"));
+  ok("inventory pagination: page has a previous/next control", (await page.locator('button:has-text("Next →")').count()) === 1);
+  ok("inventory pagination: shows the filtered total", body.includes("11 products"));
+  await page.goto(`${config.appUrl}/admin/inventory?q=Page+E2E&page=1`, { waitUntil: "networkidle" });
+  body = await page.innerText("body");
+  ok("inventory pagination: second page shown", body.includes("Page 2 of 2"));
+  ok("inventory pagination: later products appear", body.includes("Page E2E 11"));
+
+  // --- 17d. Inventory product details --------------------------------------
+  await page.goto(`${config.appUrl}/admin/inventory/${validId}`, { waitUntil: "networkidle" });
+  body = await page.innerText("body");
+  ok("details: shows the product name", body.includes("Inv Valid E2E"));
+  ok("details: shows available quantity", /available quantity/i.test(body));
+  ok("details: shows the batch number", body.includes("INV-VALID"));
+  ok("details: shows the expiration status", body.includes("Valid"));
+  ok("details: shows movement history section", body.includes("Stock movement history"));
+  ok("details: shows a clean image placeholder when there is no image", (await page.locator(".admin-detail-placeholder").count()) === 1);
+  ok("details: has a way back to inventory", (await page.locator('a:has-text("Back to inventory")').count()) === 1);
+
+  // A product with an image shows it on the details page.
+  await page.goto(`${config.appUrl}/admin/inventory/${imageProductId}`, { waitUntil: "networkidle" });
+  ok("details: shows the product image when one exists", (await page.locator(".admin-detail-image img").count()) === 1);
+
+  // Editing a batch's expiry changes only the date, never the quantity.
+  await page.goto(`${config.appUrl}/admin/inventory/${validId}`, { waitUntil: "networkidle" });
+  await page.fill('.admin-expiry-editor input[type="date"]', daysFromNow(365));
+  await page.click('.admin-expiry-editor button[type="submit"]');
+  await page.waitForSelector(".admin-expiry-editor .admin-inline-ok", { timeout: 20000 });
+  ok(
+    "details: batch expiry updated",
+    psql(`select expiration_date from public.product_batches where product_id='${validId}'`) === daysFromNow(365)
+  );
+  ok(
+    "details: editing expiry did not change the batch quantity",
+    psql(`select quantity_remaining from public.product_batches where product_id='${validId}'`) === "7"
+  );
+  ok(
+    "details: editing expiry did not change the product quantity",
+    psql(`select quantity from public.products where id='${validId}'`) === "7"
+  );
+
+  // --- 17e. Delete from the inventory list ---------------------------------
+  // A product with no history can be deleted, after a confirmation dialog.
+  const deletableId = await createWithStock("Inv Delete E2E", 0, "", "");
+  await page.goto(`${config.appUrl}/admin/inventory?q=Inv+Delete+E2E`, { waitUntil: "networkidle" });
+  await page.click('button.admin-button-danger:has-text("Delete")');
+  await page.waitForSelector(".admin-modal", { timeout: 20000 });
+  body = await page.innerText("body");
+  ok("delete: confirmation dialog names the product", body.includes("Inv Delete E2E"));
+  ok(
+    "delete: confirm button disabled until the name is typed",
+    await page.locator('.admin-modal button:has-text("Delete permanently")').isDisabled()
+  );
+  await page.fill(".admin-modal-input", "Inv Delete E2E");
+  await page.click('.admin-modal button:has-text("Delete permanently")');
+  await page.waitForURL("**/admin/inventory?deleted=1", { timeout: 20000 });
+  ok("delete: product removed", psql(`select count(*) from public.products where id='${deletableId}'`) === "0");
+
+  // A product with history cannot be deleted; the dialog explains and offers
+  // archiving, and the history survives.
+  const keepId = await createWithStock("Inv Keep E2E", 3, daysFromNow(300), "INV-KEEP");
+  await page.goto(`${config.appUrl}/admin/inventory?q=Inv+Keep+E2E`, { waitUntil: "networkidle" });
+  await page.click('button.admin-button-danger:has-text("Delete")');
+  await page.waitForSelector(".admin-modal", { timeout: 20000 });
+  await page.fill(".admin-modal-input", "Inv Keep E2E");
+  await page.click('.admin-modal button:has-text("Delete permanently")');
+  await page.waitForSelector(".admin-modal .admin-alert-error", { timeout: 20000 });
+  body = await page.innerText("body");
+  ok("delete-blocked: explains the history block", /history|batch|movement/i.test(body));
+  ok("delete-blocked: offers archiving", (await page.locator('.admin-modal button:has-text("Archive product")').count()) === 1);
+  ok("delete-blocked: product still present", psql(`select count(*) from public.products where id='${keepId}'`) === "1");
+  ok("delete-blocked: batch history intact", psql(`select count(*) from public.product_batches where product_id='${keepId}'`) === "1");
+  ok("delete-blocked: movement history intact", psql(`select count(*) from public.stock_movements where product_id='${keepId}'`) === "1");
+
+  // Archiving from the same dialog works and keeps the history. A successful
+  // archive closes the dialog, so wait for it to disappear, then check the DB.
+  await page.click('.admin-modal button:has-text("Archive product")');
+  await page.waitForSelector(".admin-modal", { state: "hidden", timeout: 20000 });
+  ok("archive: product archived", psql(`select status from public.products where id='${keepId}'`) === "archived");
+  ok("archive: movement history preserved", psql(`select count(*) from public.stock_movements where product_id='${keepId}'`) === "1");
+
+  // --- 17f. Mobile: 16px inputs so iOS does not zoom on focus --------------
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${config.appUrl}/admin/inventory`, { waitUntil: "networkidle" });
+  const searchFont = await page
+    .locator('input[type="search"]')
+    .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  ok("mobile: search input font is at least 16px", searchFont >= 16, `got ${searchFont}`);
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  ok("mobile: no horizontal page overflow", overflow <= 1, `overflow ${overflow}`);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${config.appUrl}/admin/inventory`, { waitUntil: "networkidle" });
+  const desktopFont = await page
+    .locator('input[type="search"]')
+    .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  ok("desktop: search input keeps the 14px design size", desktopFont === 14, `got ${desktopFont}`);
 
   // --- 18. Staff are read-only --------------------------------------------
   await context.clearCookies();

@@ -8,6 +8,7 @@ import {
   StatusPill,
   formatDate
 } from "@/components/admin/ui";
+import { EXPIRING_SOON_LABEL } from "@/lib/products/batches";
 
 export const dynamic = "force-dynamic";
 
@@ -75,10 +76,10 @@ export default async function AdminOverviewPage({
           hint="Needs restocking"
         />
         <StatCard
-          label="Expiring in 30 days"
+          label="Expiring soon"
           value={String(metrics.expiringSoonCount)}
           tone={metrics.expiringSoonCount > 0 ? "warn" : "default"}
-          hint="Review batches"
+          hint={`Within ${EXPIRING_SOON_LABEL}`}
         />
         <StatCard
           label="Expired batches"
@@ -126,7 +127,7 @@ export default async function AdminOverviewPage({
 
         <SectionCard
           title="Expiring batches"
-          description="Batches expiring within the next 30 days."
+          description={`Batches expiring within ${EXPIRING_SOON_LABEL}.`}
           actions={
             <Link href="/admin/expiry" className="admin-link-quiet">
               Expiry
@@ -134,7 +135,7 @@ export default async function AdminOverviewPage({
           }
         >
           {metrics.expiringBatches.length === 0 ? (
-            <EmptyState title="No upcoming expiries" hint="No batches expire in the next 30 days." />
+            <EmptyState title="No upcoming expiries" hint={`No batches expire within ${EXPIRING_SOON_LABEL}.`} />
           ) : (
             <div className="admin-table-wrap">
               <table className="admin-table">
