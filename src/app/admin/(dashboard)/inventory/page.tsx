@@ -3,8 +3,7 @@ import { requireAdmin } from "@/lib/auth";
 import {
   getDashboardMetrics,
   getInventoryBatches,
-  getInventoryProducts,
-  getProductReferenceCountsMany
+  getInventoryProducts
 } from "@/lib/data";
 import { SectionCard, EmptyState, StatusPill, StatCard } from "@/components/admin/ui";
 import BatchTable from "@/components/admin/BatchTable";
@@ -15,7 +14,6 @@ import ProductThumb from "@/components/admin/ProductThumb";
 import { ExpiryStatusPill } from "@/components/admin/ExpiryPill";
 import type { ExpiryStatus } from "@/lib/products/batches";
 import { INVENTORY_PAGE_SIZE, toInventoryPage } from "@/lib/products/inventory";
-import { canDeleteProduct } from "@/lib/products/policy";
 import { stockStatus } from "@/lib/products/stock";
 
 export const dynamic = "force-dynamic";
@@ -62,11 +60,6 @@ export default async function AdminInventoryPage({
   const page = toInventoryPage(inventory);
   // Distinguishes "nothing in the catalogue" from "nothing matches this filter".
   const hasProducts = metrics.totalProducts > 0;
-
-  // Reference counts are only fetched for the products actually shown.
-  const references = isSuperAdmin
-    ? await getProductReferenceCountsMany(page.items.map((row) => row.id))
-    : new Map<string, { stockMovements: number; batches: number }>();
 
   const batchRows = batchPage.items.map((batch) => ({
     id: batch.id,
@@ -117,7 +110,7 @@ export default async function AdminInventoryPage({
         title="Products"
         description={
           isSuperAdmin
-            ? "Search, review expiry and manage each product. Deleting is blocked while history exists."
+            ? "Search, review expiry and manage each product. Deleting removes a product from the catalogue while its history is kept."
             : "Read-only view. Deleting and archiving products requires Super Admin."
         }
       >
@@ -144,9 +137,6 @@ export default async function AdminInventoryPage({
               <tbody>
                 {page.items.map((row) => {
                   const stock = stockStatus(row.quantity, row.minimum_stock);
-                  const decision = canDeleteProduct(
-                    references.get(row.id) ?? { stockMovements: 0, batches: 0 }
-                  );
                   return (
                     <tr key={row.id}>
                       <td>
@@ -179,12 +169,9 @@ export default async function AdminInventoryPage({
                             View details
                           </Link>
                           {isSuperAdmin && (
-                            <InventoryDeleteButton id={row.id} name={row.name} status={row.status} />
+                            <InventoryDeleteButton id={row.id} name={row.name} />
                           )}
                         </div>
-                        {isSuperAdmin && !decision.allowed && (
-                          <small className="admin-field-hint">Has history — archive instead.</small>
-                        )}
                       </td>
                     </tr>
                   );

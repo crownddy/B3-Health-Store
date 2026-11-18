@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { filterProducts, collectCategories } from "../src/lib/products/query.ts";
-import { canDeleteProduct } from "../src/lib/products/policy.ts";
+import { planProductDeletion } from "../src/lib/products/policy.ts";
 import { stockStatus } from "../src/lib/products/stock.ts";
 import { describeWriteError } from "../src/lib/products/errors.ts";
 import type { ProductRecord } from "../src/lib/products/types.ts";
@@ -76,20 +76,29 @@ test("collectCategories returns sorted, distinct names", () => {
   assert.deepEqual(collectCategories(catalogue), ["Vitamins", "Wellness"]);
 });
 
-test("canDeleteProduct blocks products with stock movements", () => {
-  const decision = canDeleteProduct({ stockMovements: 3, batches: 0 });
-  assert.equal(decision.allowed, false);
-  if (!decision.allowed) assert.match(decision.reason, /3 stock movements/);
+test("planProductDeletion hard deletes a product with no history", () => {
+  assert.deepEqual(planProductDeletion({ stockMovements: 0, batches: 0 }), { mode: "hard" });
 });
 
-test("canDeleteProduct blocks products with batches", () => {
-  const decision = canDeleteProduct({ stockMovements: 0, batches: 1 });
-  assert.equal(decision.allowed, false);
-  if (!decision.allowed) assert.match(decision.reason, /1 batch\b/);
+test("planProductDeletion soft deletes a product with stock movements", () => {
+  const plan = planProductDeletion({ stockMovements: 3, batches: 0 });
+  assert.equal(plan.mode, "soft");
+  if (plan.mode === "soft") assert.match(plan.reason, /3 stock movements/);
 });
 
-test("canDeleteProduct allows an unreferenced product", () => {
-  assert.equal(canDeleteProduct({ stockMovements: 0, batches: 0 }).allowed, true);
+test("planProductDeletion soft deletes a product with batches", () => {
+  const plan = planProductDeletion({ stockMovements: 0, batches: 1 });
+  assert.equal(plan.mode, "soft");
+  if (plan.mode === "soft") assert.match(plan.reason, /1 batch\b/);
+});
+
+test("planProductDeletion names both batches and movements", () => {
+  const plan = planProductDeletion({ stockMovements: 2, batches: 2 });
+  assert.equal(plan.mode, "soft");
+  if (plan.mode === "soft") {
+    assert.match(plan.reason, /2 batches/);
+    assert.match(plan.reason, /2 stock movements/);
+  }
 });
 
 test("stockStatus classifies quantity against the reorder level", () => {
@@ -110,7 +119,7 @@ test("describeWriteError names the offending field for duplicates", () => {
   );
 });
 
-test("describeWriteError explains a blocked delete", () => {
+test("describeWriteError explains a foreign-key violation", () => {
   assert.match(describeWriteError({ code: "23503", message: "violates foreign key" }), /cannot be removed/);
 });
 

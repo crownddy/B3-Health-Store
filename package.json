@@ -16,6 +16,7 @@
     "test:integration:transactions": "node tests/integration/transactions.suite.mjs",
     "test:integration:sold": "node tests/integration/sold.suite.mjs",
     "test:integration:inventory": "node tests/integration/inventory.suite.mjs",
+    "test:integration:deletion": "node tests/integration/deletion.suite.mjs",
     "test:integration:rpc-fallback": "node tests/integration/scripts/run-e2e.mjs rpc-fallback.suite.mjs",
     "test:integration:headers": "node tests/integration/scripts/run-e2e.mjs headers.suite.mjs",
     "test:integration:e2e": "node tests/integration/scripts/run-e2e.mjs"

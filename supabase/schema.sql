@@ -46,6 +46,17 @@ alter table public.products
   add column if not exists status text not null default 'active'
   check (status in ('active', 'archived'));
 
+-- Soft-delete marker. A product with batch or stock-movement history is hidden
+-- from every active screen by setting this instead of deleting the row, so its
+-- history is preserved. Null means "not deleted". Distinct from `status =
+-- 'archived'`: an archived product stays in the catalogue, a deleted one does
+-- not.
+alter table public.products
+  add column if not exists deleted_at timestamptz;
+
+create index if not exists products_deleted_at_idx
+  on public.products (deleted_at);
+
 create unique index if not exists products_barcode_key
   on public.products (barcode)
   where barcode is not null;

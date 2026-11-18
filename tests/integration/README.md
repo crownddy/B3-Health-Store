@@ -8,10 +8,11 @@ Seven suites live here:
 
 | Suite | File | What it checks |
 |---|---|---|
-| RLS / authorization | `rls.suite.mjs` | Every read/write policy for products and profiles |
+| RLS / authorization | `rls.suite.mjs` | Every read/write policy for products and profiles, and that the history-protecting foreign keys still refuse a hard delete |
 | Atomicity / concurrency | `transactions.suite.mjs` | The inventory RPCs commit all-or-nothing, failed operations leave no trace, FEFO spans batches, and concurrent stock-outs cannot oversell |
 | Sold screen | `sold.suite.mjs` | The sellable-availability helpers list only sellable products with the right quantity, expired stock is excluded, and a sale deducts through the stock-out RPC (FEFO, atomic, authorized) |
 | Inventory query | `inventory.suite.mjs` | The pushed-down `list_inventory_products` / `list_inventory_batches` / `dashboard_metrics` functions: search, expiry filter, paging, exact totals and per-role authorization |
+| Product deletion | `deletion.suite.mjs` | Products with no history are hard deleted and products with batches or movements are soft deleted, hidden from every active list while their history survives; a deleted product cannot be restocked, and Staff cannot delete |
 | RPC fallback | `rpc-fallback.suite.mjs` | With the pushed-down functions absent (a database that has not had the migration applied), the admin pages still render instead of throwing a server-side exception |
 | Fixed headers | `headers.suite.mjs` | Every header stays at the top of the viewport while the page scrolls (storefront, detail and admin), the back button and hamburger stay usable, pinned bars do not overlap, and no page overflows horizontally |
 | Browser E2E | `e2e.suite.mjs` | The admin console UI end to end in a real browser, including the Sold screen |
@@ -58,14 +59,17 @@ npm run test:integration:sold
 # 6. Inventory query suite (pushed-down search, filtering, paging, metrics)
 npm run test:integration:inventory
 
-# 7. RPC fallback suite (admin pages work before the migration is applied;
+# 7. Product deletion suite (hard vs soft delete, history preserved)
+npm run test:integration:deletion
+
+# 8. RPC fallback suite (admin pages work before the migration is applied;
 #    needs a production build, starts and stops the app itself)
 npm run test:integration:rpc-fallback
 
-# 8. Fixed headers suite (needs a production build; starts and stops the app itself)
+# 9. Fixed headers suite (needs a production build; starts and stops the app itself)
 npm run test:integration:headers
 
-# 9. Browser E2E suite (starts and stops the app itself)
+# 10. Browser E2E suite (starts and stops the app itself)
 npm run build
 npm run test:integration:e2e
 ```

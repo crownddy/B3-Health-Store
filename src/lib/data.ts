@@ -155,7 +155,8 @@ async function getDashboardMetricsFallback(
       .from("products")
       .select(
         "id,name,category,sku,selling_price,purchase_price,quantity,minimum_stock,shelf_number,is_visible_on_homepage,is_featured,created_at"
-      ),
+      )
+      .is("deleted_at", null),
     supabase.from("categories").select("id", { count: "exact", head: true }),
     supabase.from("profiles").select("id", { count: "exact", head: true }),
     supabase
@@ -165,7 +166,7 @@ async function getDashboardMetricsFallback(
       .limit(6),
     supabase
       .from("product_batches")
-      .select("id,batch_number,expiration_date,quantity_remaining,products(name)")
+      .select("id,batch_number,expiration_date,quantity_remaining,products(name,deleted_at)")
       .not("expiration_date", "is", null)
       .order("expiration_date", { ascending: true })
   ]);
@@ -177,7 +178,13 @@ async function getDashboardMetricsFallback(
   }
 
   const products = (productsRes.data ?? []) as ProductRow[];
-  const batches = (batchesRes.data ?? []) as ExpiringRow[];
+  // A deleted product's batches are history and are not counted as current risk.
+  const batches = ((batchesRes.data ?? []) as unknown as (Omit<ExpiringRow, "products"> & {
+    products: { name: string; deleted_at: string | null } | { name: string; deleted_at: string | null }[] | null;
+  })[]).filter((batch) => {
+    const product = Array.isArray(batch.products) ? batch.products[0] : batch.products;
+    return product?.deleted_at == null;
+  }) as ExpiringRow[];
 
   const inventoryValue = products.reduce(
     (sum, product) => sum + Number(product.selling_price ?? 0) * Number(product.quantity ?? 0),
@@ -277,6 +284,7 @@ async function getInventoryProductsFallback(
     supabase
       .from("products")
       .select("id,name,category,image_url,quantity,minimum_stock,status")
+      .is("deleted_at", null)
       .order("created_at", { ascending: false }),
     supabase.from("product_batches").select("product_id,expiration_date,quantity_remaining")
   ]);
@@ -372,7 +380,7 @@ export async function getInventoryBatches(
   };
 }
 
-type BatchRowWithProduct = InventoryBatchRow & { product_id: string };
+type BatchRowWithProduct = InventoryBatchRow & { product_id: string; product_deleted: boolean };
 
 /**
  * The original application-side batch query, kept as the fallback for a
@@ -387,31 +395,35 @@ async function getInventoryBatchesFallback(
 ): Promise<InventoryBatchPage> {
   const { data, error } = await supabase
     .from("product_batches")
-    .select("id,batch_number,expiration_date,quantity_remaining,product_id,products(name)");
+    .select("id,batch_number,expiration_date,quantity_remaining,product_id,products(name,deleted_at)");
   if (error) throw new Error(`Unable to load batches: ${error.message}`);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const rows: BatchRowWithProduct[] = (data ?? []).map((row) => {
-    const record = row as unknown as {
-      id: string;
-      batch_number: string | null;
-      expiration_date: string | null;
-      quantity_remaining: number;
-      product_id: string;
-      products: { name: string } | { name: string }[] | null;
-    };
-    const product = Array.isArray(record.products) ? record.products[0] : record.products;
-    return {
-      id: record.id,
-      batch_number: record.batch_number,
-      expiration_date: record.expiration_date,
-      quantity_remaining: record.quantity_remaining,
-      product_name: product?.name ?? null,
-      product_id: record.product_id
-    };
-  });
+  const rows: BatchRowWithProduct[] = (data ?? [])
+    .map((row) => {
+      const record = row as unknown as {
+        id: string;
+        batch_number: string | null;
+        expiration_date: string | null;
+        quantity_remaining: number;
+        product_id: string;
+        products: { name: string; deleted_at: string | null } | { name: string; deleted_at: string | null }[] | null;
+      };
+      const product = Array.isArray(record.products) ? record.products[0] : record.products;
+      return {
+        id: record.id,
+        batch_number: record.batch_number,
+        expiration_date: record.expiration_date,
+        quantity_remaining: record.quantity_remaining,
+        product_name: product?.name ?? null,
+        product_id: record.product_id,
+        product_deleted: product?.deleted_at != null
+      };
+    })
+    // A deleted product's batches are history: hidden from the active list.
+    .filter((row) => !row.product_deleted);
 
   // Counts are over the whole table, independent of the requested filter slice.
   const expired = rows.filter((row) => classifyExpiry(row.expiration_date, today) === "expired").length;
@@ -447,6 +459,7 @@ export async function getProducts(): Promise<ProductRecord[]> {
   const { data, error } = await supabase
     .from("products")
     .select(PRODUCT_COLUMNS)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) throw new Error(`Unable to load products: ${error.message}`);
   return (data ?? []) as unknown as ProductRecord[];
@@ -459,6 +472,7 @@ export async function getProduct(id: string): Promise<ProductRecord | null> {
     .from("products")
     .select(PRODUCT_COLUMNS)
     .eq("id", id)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) throw new Error(`Unable to load product: ${error.message}`);
   return (data as unknown as ProductRecord) ?? null;
@@ -497,38 +511,6 @@ export async function getProductReferenceCounts(
   if (movements.error) throw new Error(`Unable to check movements: ${movements.error.message}`);
   if (batches.error) throw new Error(`Unable to check batches: ${batches.error.message}`);
   return { stockMovements: movements.count ?? 0, batches: batches.count ?? 0 };
-}
-
-/**
- * Reference counts for several products at once, for the Inventory list.
- *
- * Only the ids on the current page are requested, so the check never loads the
- * whole catalogue. Row Level Security still decides what the caller can count.
- */
-export async function getProductReferenceCountsMany(
-  productIds: string[]
-): Promise<Map<string, { stockMovements: number; batches: number }>> {
-  const result = new Map<string, { stockMovements: number; batches: number }>();
-  if (!isSupabaseConfigured || productIds.length === 0) return result;
-
-  const supabase = await createClient();
-  const [movements, batches] = await Promise.all([
-    supabase.from("stock_movements").select("product_id").in("product_id", productIds),
-    supabase.from("product_batches").select("product_id").in("product_id", productIds)
-  ]);
-  if (movements.error) throw new Error(`Unable to check movements: ${movements.error.message}`);
-  if (batches.error) throw new Error(`Unable to check batches: ${batches.error.message}`);
-
-  for (const id of productIds) result.set(id, { stockMovements: 0, batches: 0 });
-  for (const row of (movements.data ?? []) as { product_id: string }[]) {
-    const entry = result.get(row.product_id);
-    if (entry) entry.stockMovements += 1;
-  }
-  for (const row of (batches.data ?? []) as { product_id: string }[]) {
-    const entry = result.get(row.product_id);
-    if (entry) entry.batches += 1;
-  }
-  return result;
 }
 
 /** Stock movement history for one product, newest first. */
@@ -622,9 +604,17 @@ export async function getBatches(): Promise<BatchWithProduct[]> {
   const { data, error } = await supabase
     .from("product_batches")
     .select(
-      "id,product_id,batch_number,production_date,expiration_date,quantity_received,quantity_remaining,created_at,products(name)"
+      "id,product_id,batch_number,production_date,expiration_date,quantity_received,quantity_remaining,created_at,products(name,deleted_at)"
     )
     .order("expiration_date", { ascending: true, nullsFirst: false });
   if (error) throw new Error(`Unable to load batches: ${error.message}`);
-  return (data ?? []) as unknown as BatchWithProduct[];
+
+  // A deleted product's batches are history, so they are hidden from the expiry
+  // screen. The batch rows themselves are never removed.
+  return ((data ?? []) as unknown as (Omit<BatchWithProduct, "products"> & {
+    products: { name: string; deleted_at: string | null } | { name: string; deleted_at: string | null }[] | null;
+  })[]).filter((batch) => {
+    const product = Array.isArray(batch.products) ? batch.products[0] : batch.products;
+    return product?.deleted_at == null;
+  }) as BatchWithProduct[];
 }

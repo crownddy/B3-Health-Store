@@ -5,8 +5,7 @@ import { requireAdmin } from "@/lib/auth";
 import {
   getProduct,
   getProductBatches,
-  getProductMovements,
-  getProductReferenceCounts
+  getProductMovements
 } from "@/lib/data";
 import {
   SectionCard,
@@ -20,7 +19,6 @@ import BatchTable from "@/components/admin/BatchTable";
 import InventoryDeleteButton from "@/components/admin/InventoryDeleteButton";
 import { ExpiryStatusPill } from "@/components/admin/ExpiryPill";
 import { productExpiryStatus } from "@/lib/products/batches";
-import { canDeleteProduct } from "@/lib/products/policy";
 import { stockStatus } from "@/lib/products/stock";
 
 export const dynamic = "force-dynamic";
@@ -43,13 +41,11 @@ export default async function InventoryProductPage({
   const product = await getProduct(id);
   if (!product) notFound();
 
-  const [batches, movements, references] = await Promise.all([
+  const [batches, movements] = await Promise.all([
     getProductBatches(id),
-    getProductMovements(id, 50),
-    getProductReferenceCounts(id)
+    getProductMovements(id, 50)
   ]);
 
-  const decision = canDeleteProduct(references);
   const stock = stockStatus(product.quantity, product.minimum_stock);
   const expiry = productExpiryStatus(batches);
 
@@ -221,12 +217,11 @@ export default async function InventoryProductPage({
       {isSuperAdmin && (
         <SectionCard
           title="Lifecycle"
-          description="Deletion is blocked when batches or stock movements exist, so history is never lost."
+          description="Delete removes the product from the catalogue. Batches and stock-movement history are preserved."
         >
           <div className="admin-row-actions">
-            <InventoryDeleteButton id={product.id} name={product.name} status={product.status} />
+            <InventoryDeleteButton id={product.id} name={product.name} />
           </div>
-          {!decision.allowed && <p className="admin-note">{decision.reason}</p>}
         </SectionCard>
       )}
 

@@ -110,10 +110,15 @@ await rest(`products?id=eq.${createdId}`, { token: superToken, method: "DELETE" 
 check("super admin DELETE removes the row", 0, psql(`select count(*) from public.products where id='${createdId}'`));
 
 // --- History protection and archive ---------------------------------------
+// A product with history cannot be hard deleted: the ON DELETE RESTRICT foreign
+// keys refuse it. The application soft deletes such a product instead (see the
+// deletion suite); here we prove the database still refuses the destructive
+// delete so a forged request cannot erase history.
 const vitaminC = psql("select id from public.products where sku='VITC-1'");
 psql(`insert into public.stock_movements (product_id, movement_type, quantity, note) values ('${vitaminC}','stock_in',5,'rls suite')`);
 await rest(`products?id=eq.${vitaminC}`, { token: superToken, method: "DELETE" });
 check("delete blocked while stock history exists", 1, psql(`select count(*) from public.products where id='${vitaminC}'`));
+check("movement history intact after blocked delete", 1, psql(`select count(*) from public.stock_movements where product_id='${vitaminC}'`));
 
 // A batch is history too. The foreign key must be ON DELETE RESTRICT, so a
 // product that only has a batch (no stock movement) still cannot be deleted,
@@ -134,6 +139,26 @@ psql(
 await rest(`products?id=eq.${batchProductId}`, { token: superToken, method: "DELETE" });
 check("delete blocked while batch history exists", 1, psql(`select count(*) from public.products where id='${batchProductId}'`));
 check("batch history intact after blocked delete", 1, psql(`select count(*) from public.product_batches where product_id='${batchProductId}'`));
+
+// The soft-delete marker is a normal UPDATE, so a Super Admin may set it and
+// the history survives; a Staff user may not (RLS filters the row out).
+await rest(`products?id=eq.${batchProductId}`, {
+  token: staffToken,
+  method: "PATCH",
+  body: { deleted_at: new Date().toISOString() }
+});
+check("staff cannot soft delete a product", "false", psql(`select (deleted_at is not null)::text from public.products where id='${batchProductId}'`));
+
+await rest(`products?id=eq.${batchProductId}`, {
+  token: superToken,
+  method: "PATCH",
+  body: { deleted_at: new Date().toISOString(), status: "archived", is_visible_on_homepage: false }
+});
+check("super admin can soft delete a product", "true", psql(`select (deleted_at is not null)::text from public.products where id='${batchProductId}'`));
+check("batch history survives a soft delete", 1, psql(`select count(*) from public.product_batches where product_id='${batchProductId}'`));
+check("a soft-deleted product is hidden from the public", 0, await count(`products?select=id&id=eq.${batchProductId}`));
+
+psql(`delete from public.stock_movements where product_id='${batchProductId}'`);
 psql(`delete from public.product_batches where product_id='${batchProductId}'`);
 await rest(`products?id=eq.${batchProductId}`, { token: superToken, method: "DELETE" });
 

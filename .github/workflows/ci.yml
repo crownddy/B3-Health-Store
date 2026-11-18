@@ -76,6 +76,9 @@ jobs:
       - name: Run Inventory query suite
         run: npm run test:integration:inventory
 
+      - name: Run product deletion suite
+        run: npm run test:integration:deletion
+
       - name: Build the app
         run: npm run build
 

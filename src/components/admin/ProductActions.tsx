@@ -7,14 +7,10 @@ import type { ProductStatus } from "@/lib/products/types";
 
 export default function ProductActions({
   id,
-  status,
-  canDelete,
-  deleteBlockedReason
+  status
 }: {
   id: string;
   status: ProductStatus;
-  canDelete: boolean;
-  deleteBlockedReason: string | null;
 }) {
   const [archiveState, archiveAction, archivePending] = useActionState<ProductActionState, FormData>(
     archiveProduct,
@@ -51,33 +47,29 @@ export default function ProductActions({
         )}
       </form>
 
-      {canDelete ? (
-        <form
-          action={deleteAction}
-          className="admin-inline-form"
-          onSubmit={(event) => {
-            if (
-              !window.confirm(
-                "Permanently delete this product? This cannot be undone. Products with stock history cannot be deleted."
-              )
-            ) {
-              event.preventDefault();
-            }
-          }}
-        >
-          <input type="hidden" name="id" value={id} />
-          <button type="submit" className="admin-button-small admin-button-danger" disabled={deletePending}>
-            {deletePending ? "Deleting…" : "Delete permanently"}
-          </button>
-          {deleteState.message && (
-            <span className={deleteState.ok ? "admin-inline-ok" : "admin-inline-error"} role="status">
-              {deleteState.message}
-            </span>
-          )}
-        </form>
-      ) : (
-        deleteBlockedReason && <small className="admin-field-hint">{deleteBlockedReason}</small>
-      )}
+      <form
+        action={deleteAction}
+        className="admin-inline-form"
+        onSubmit={(event) => {
+          if (
+            !window.confirm(
+              "Are you sure you want to delete this product? It will be removed from the catalogue. Any batch and stock-movement history is kept."
+            )
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <input type="hidden" name="id" value={id} />
+        <button type="submit" className="admin-button-small admin-button-danger" disabled={deletePending}>
+          {deletePending ? "Deleting…" : "Delete product"}
+        </button>
+        {deleteState.message && (
+          <span className={deleteState.ok ? "admin-inline-ok" : "admin-inline-error"} role="status">
+            {deleteState.message}
+          </span>
+        )}
+      </form>
     </div>
   );
 }

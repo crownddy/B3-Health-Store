@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { getProductReferenceCounts, getProducts } from "@/lib/data";
 import { validateProductInput, validateInitialStock, firstError } from "@/lib/products/validation";
-import { canDeleteProduct } from "@/lib/products/policy";
+import { deleteProductSafely } from "@/lib/products/delete";
 import { describeWriteError } from "@/lib/products/errors";
 import type { ProductActionState } from "@/lib/products/action-state";
 
@@ -195,16 +195,15 @@ export async function deleteProduct(
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { ok: false, message: "Missing product." };
 
-  // Refuse to delete anything with history. The database enforces this too
-  // (stock_movements.product_id is on delete restrict), but checking first
-  // gives the user a clear, actionable message instead of a raw error.
+  // A product with batches or stock movements cannot be hard deleted without
+  // destroying history (the foreign keys are ON DELETE RESTRICT), so it is soft
+  // deleted: hidden from the catalogue while its history stays in the database.
+  // A product with no history is removed outright.
   const references = await getProductReferenceCounts(id);
-  const decision = canDeleteProduct(references);
-  if (!decision.allowed) return { ok: false, message: decision.reason };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("products").delete().eq("id", id);
-  if (error) return { ok: false, message: describeWriteError(error) };
+  const outcome = await deleteProductSafely(supabase, id, references);
+  if (!outcome.ok) return { ok: false, message: outcome.message };
 
   revalidatePath("/admin/products");
   revalidatePath("/admin/inventory");

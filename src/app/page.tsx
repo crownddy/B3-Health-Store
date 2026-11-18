@@ -51,6 +51,7 @@ export default function Home() {
         .from("products")
         .select("id,name,description,category,image_url,selling_price,quantity,shelf_number,is_featured")
         .eq("is_visible_on_homepage", true)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (!error && data && active) setProducts(data as Product[]);
       if (active) setLoading(false);

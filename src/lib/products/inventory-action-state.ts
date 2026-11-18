@@ -7,11 +7,6 @@
 export type InventoryActionState = {
   ok: boolean;
   message: string;
-  /**
-   * Set when a permanent delete was refused because batches or stock movements
-   * exist, so the dialog can explain the block and offer archiving instead.
-   */
-  blocked?: boolean;
 };
 
 export const EMPTY_INVENTORY_STATE: InventoryActionState = { ok: false, message: "" };

@@ -29,6 +29,10 @@ import { psql, psqlFile } from "./scripts/db.mjs";
 
 const config = resolveConfig();
 const MIGRATION = "supabase/migrations/20261119_inventory_query_pushdown.sql";
+// The soft-delete migration replaces the same three functions, adding the
+// `deleted_at` filters. Re-applying only the pushdown migration would drop that
+// filter, so both are replayed to restore the functions to their current shape.
+const SOFT_DELETE_MIGRATION = "supabase/migrations/20261120_product_soft_delete.sql";
 const FUNCTIONS = [
   "public.list_inventory_products(text,text,integer,integer,integer)",
   "public.list_inventory_batches(text,integer,integer,integer)",
@@ -61,6 +65,7 @@ function dropFunctions() {
 
 function restoreFunctions() {
   psqlFile(MIGRATION);
+  psqlFile(SOFT_DELETE_MIGRATION);
   psql("notify pgrst, 'reload schema'");
 }
 

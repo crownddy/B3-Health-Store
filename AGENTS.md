@@ -67,6 +67,7 @@ npm run test:integration:rls
 npm run test:integration:transactions
 npm run test:integration:sold
 npm run test:integration:inventory
+npm run test:integration:deletion
 npm run test:integration:rpc-fallback
 npm run test:integration:headers   # needs `npm run build` first
 npm run test:integration:e2e     # needs `npm run build` first
