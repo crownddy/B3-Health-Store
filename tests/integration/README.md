@@ -4,13 +4,15 @@ These suites exercise product management against a **real local Supabase stack**
 real GoTrue auth, real PostgREST requests, real Postgres RLS and real Storage.
 They are the layer that unit tests cannot cover.
 
-Three suites live here:
+Six suites live here:
 
 | Suite | File | What it checks |
 |---|---|---|
 | RLS / authorization | `rls.suite.mjs` | Every read/write policy for products and profiles |
 | Atomicity / concurrency | `transactions.suite.mjs` | The inventory RPCs commit all-or-nothing, failed operations leave no trace, FEFO spans batches, and concurrent stock-outs cannot oversell |
 | Sold screen | `sold.suite.mjs` | The sellable-availability helpers list only sellable products with the right quantity, expired stock is excluded, and a sale deducts through the stock-out RPC (FEFO, atomic, authorized) |
+| Inventory query | `inventory.suite.mjs` | The pushed-down `list_inventory_products` / `list_inventory_batches` / `dashboard_metrics` functions: search, expiry filter, paging, exact totals and per-role authorization |
+| RPC fallback | `rpc-fallback.suite.mjs` | With the pushed-down functions absent (a database that has not had the migration applied), the admin pages still render instead of throwing a server-side exception |
 | Browser E2E | `e2e.suite.mjs` | The admin console UI end to end in a real browser, including the Sold screen |
 
 ## Safety: local only
@@ -55,13 +57,17 @@ npm run test:integration:sold
 # 6. Inventory query suite (pushed-down search, filtering, paging, metrics)
 npm run test:integration:inventory
 
-# 7. Browser E2E suite (starts and stops the app itself)
+# 7. RPC fallback suite (admin pages work before the migration is applied;
+#    needs a production build, starts and stops the app itself)
+npm run test:integration:rpc-fallback
+
+# 8. Browser E2E suite (starts and stops the app itself)
 npm run build
 npm run test:integration:e2e
 ```
 
-`test:integration:e2e` needs a production build (`npm run build`) because it
-runs `next start`.
+`test:integration:e2e` and `test:integration:rpc-fallback` need a production
+build (`npm run build`) because they run `next start`.
 
 ## What `setup` does
 

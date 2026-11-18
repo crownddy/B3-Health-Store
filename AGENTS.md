@@ -13,10 +13,15 @@ Mobile-first. TypeScript strict. No CSS framework — hand-written CSS in
 - `src/lib/data.ts` — every read the admin screens use. Uses the request-scoped
   Supabase client, so Row Level Security applies to the signed-in user. The
   Inventory list and the dashboard read through the RPCs
-  `list_inventory_products` / `dashboard_metrics`
+  `list_inventory_products` / `list_inventory_batches` / `dashboard_metrics`
   (`20261119_inventory_query_pushdown.sql`) so search, expiry filtering, paging
   and the totals are computed in the database — never load the whole catalogue
-  and filter in app code.
+  and filter in app code. A deployment can reach a database that does not have
+  that migration yet (e.g. a Vercel preview pointed at the existing project), so
+  these three reads fall back to the original application-side query when
+  PostgREST reports the function is missing (`isMissingRpcFunction` in
+  `src/lib/supabase/rpc.ts`). Only that specific "function not found" error
+  falls back — every other error still throws.
 - `src/lib/products/**` — pure, unit-testable helpers (expiry, stock, policy,
   validation, pagination). Server actions live next to their pages in
   `actions.ts` files.

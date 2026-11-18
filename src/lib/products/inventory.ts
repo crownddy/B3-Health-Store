@@ -1,14 +1,24 @@
 /**
  * Shapes and mapping for the Inventory product list.
  *
- * Search, expiration filtering and pagination are done by the database (see
- * `list_inventory_products` in
+ * The primary path does search, expiration filtering and pagination in the
+ * database (see `list_inventory_products` in
  * supabase/migrations/20261119_inventory_query_pushdown.sql), so only the
  * requested page of products crosses the wire. This module holds the pure
- * mapping from that payload to what the list renders, so it can be unit tested
- * without a database. Nothing here touches stock or batch records.
+ * mapping from that payload to what the list renders.
+ *
+ * It also holds the application-side equivalent, used as a fallback when the
+ * database function is not deployed yet (see `src/lib/supabase/rpc.ts`). Both
+ * paths produce the same `InventoryPage`, so the list renders identically and
+ * the fallback can be unit tested without a database. Nothing here touches
+ * stock or batch records.
  */
-import type { ExpiryStatus } from "./batches.ts";
+import {
+  productExpiryStatus,
+  type ExpiryStatus,
+  type ExpirySummaryBatch
+} from "./batches.ts";
+import { clampPage, pageCount } from "./pagination.ts";
 
 /** Products shown per page on the Inventory list. */
 export const INVENTORY_PAGE_SIZE = 10;
@@ -57,6 +67,22 @@ export type InventoryPagePayload = {
   pages?: number;
 };
 
+/** The product fields the application-side fallback needs. */
+export type InventoryProduct = {
+  id: string;
+  name: string;
+  category: string | null;
+  image_url: string | null;
+  quantity: number;
+  minimum_stock: number;
+  status: string;
+};
+
+/** A batch joined to its product, as loaded for the application-side fallback. */
+export type InventoryBatch = ExpirySummaryBatch & {
+  product_id: string;
+};
+
 const EXPIRY_STATUSES: readonly ExpiryStatus[] = [
   "expired",
   "expiring_soon",
@@ -103,4 +129,79 @@ export function toInventoryPage(
   const page = Math.min(Math.max(0, requested), pages - 1);
 
   return { items, total, page, pages };
+}
+
+// --- Application-side fallback -------------------------------------------
+//
+// Used only when the database functions are not deployed yet. These reproduce
+// the exact rules the RPCs apply, so the list is correct either way; they are
+// pure so they can be unit tested without a database.
+
+/** Groups batches by product id, so each product can be summarised once. */
+export function groupBatchesByProduct(
+  batches: InventoryBatch[]
+): Map<string, ExpirySummaryBatch[]> {
+  const grouped = new Map<string, ExpirySummaryBatch[]>();
+  for (const batch of batches) {
+    const list = grouped.get(batch.product_id);
+    if (list) list.push(batch);
+    else grouped.set(batch.product_id, [batch]);
+  }
+  return grouped;
+}
+
+/**
+ * Attaches a batch count and an aggregate expiration status to every product.
+ *
+ * The status is derived from the product's in-stock batches (see
+ * `productExpiryStatus`), so the list shows the same classification the detail
+ * page and the expiry screens use, and the same one the RPC computes.
+ */
+export function buildInventoryRows(
+  products: InventoryProduct[],
+  batches: InventoryBatch[],
+  today: Date = new Date()
+): InventoryRow[] {
+  const grouped = groupBatchesByProduct(batches);
+  return products.map((product) => {
+    const own = grouped.get(product.id) ?? [];
+    return {
+      ...product,
+      batchCount: own.length,
+      expiryStatus: productExpiryStatus(own, today)
+    };
+  });
+}
+
+/** Case-insensitive search on the product name, matching the RPC's ILIKE. */
+export function searchInventory<T extends { name: string }>(rows: T[], term: string): T[] {
+  const needle = term.trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter((row) => row.name.toLowerCase().includes(needle));
+}
+
+/** Keeps only the products whose aggregate expiration status matches. */
+export function filterByExpiryStatus(
+  rows: InventoryRow[],
+  status: ExpiryStatus | "all"
+): InventoryRow[] {
+  if (status === "all") return rows;
+  return rows.filter((row) => row.expiryStatus === status);
+}
+
+/** Slices a filtered list to one page, clamping the requested page into range. */
+export function paginateInventory(
+  rows: InventoryRow[],
+  requestedPage: number,
+  pageSize: number = INVENTORY_PAGE_SIZE
+): InventoryPage {
+  const total = rows.length;
+  const page = clampPage(requestedPage, total, pageSize);
+  const start = page * pageSize;
+  return {
+    items: rows.slice(start, start + pageSize),
+    total,
+    page,
+    pages: pageCount(total, pageSize)
+  };
 }

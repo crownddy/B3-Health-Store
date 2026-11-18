@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * Runs the browser E2E suite: builds nothing, starts the production server
- * against the local stack, runs e2e.suite.mjs, then stops the server.
+ * Runs a browser suite against a production build: starts the production server
+ * against the local stack, runs the suite, then stops the server.
+ *
+ * The suite defaults to e2e.suite.mjs; pass another file name to reuse the same
+ * server lifecycle (e.g. `run-e2e.mjs rpc-fallback.suite.mjs`).
  *
  * The app is started with the local Supabase URL and anon key exported into the
  * environment, so it never reads .env.local and never talks to a hosted project.
@@ -15,6 +18,7 @@ import { REPO_ROOT, resolveConfig } from "./env.mjs";
 
 const config = resolveConfig();
 const port = new URL(config.appUrl).port || "12000";
+const suiteFile = process.argv[2] || "e2e.suite.mjs";
 
 const server = spawn("npm", ["run", "start", "--", "-p", port], {
   cwd: REPO_ROOT,
@@ -54,7 +58,7 @@ async function waitForServer() {
 try {
   await waitForServer();
   console.log(`App ready at ${config.appUrl}`);
-  const suite = spawn("node", [join(REPO_ROOT, "tests", "integration", "e2e.suite.mjs")], {
+  const suite = spawn("node", [join(REPO_ROOT, "tests", "integration", suiteFile)], {
     stdio: "inherit"
   });
   const code = await new Promise((resolve) => suite.on("exit", resolve));
