@@ -1,11 +1,20 @@
 /* Admin console styles. Reuses the design tokens defined in globals.css. */
 
 /* Keep the layout inside the viewport: a stray wide child must scroll, not
-   stretch the page and let content overlap the sidebar. */
+   stretch the page and let content overlap the sidebar.
+
+   `overflow-x: clip` clips exactly like `hidden` but does NOT create a scroll
+   container. That matters: `overflow: hidden` on html/body turns them into a
+   scroll container, which silently disables `position: sticky` for every
+   descendant — it was what stopped the admin topbar and sidebar from sticking
+   to the top. `hidden` is kept first as a fallback for browsers without
+   `clip` (Safari < 16); browsers that understand `clip` use it and keep the
+   sticky headers working. */
 html,
 body {
   max-width: 100%;
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* ---------- Login ---------- */
@@ -683,16 +692,28 @@ body {
 
 /* ---------- Responsive ---------- */
 @media (max-width: 860px) {
+  /* One column. Flex (not the desktop grid) so the brand/menu row is a direct
+     child of the tall shell and can therefore stay pinned while scrolling. */
   .admin-shell {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    /* Height of the pinned brand/menu row, used to pin the user bar directly
+       beneath it. `--admin-head` is measured at runtime by AdminNav (and kept in
+       step by a ResizeObserver); this value is only the pre-hydration fallback. */
+    --admin-head: calc(161px + env(safe-area-inset-top));
   }
 
+  /* Brand + hamburger row: pinned to the top. `overflow: visible` so the open
+     menu below it is not clipped. */
   .admin-sidebar {
-    position: static;
+    position: sticky;
+    top: 0;
+    z-index: 7;
     height: auto;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    padding: 14px;
+    padding: calc(14px + env(safe-area-inset-top)) 14px 14px;
   }
 
   .admin-nav-toggle {
@@ -703,8 +724,30 @@ body {
     display: none;
   }
 
+  /* Open menu floats over the content instead of pushing it, so the pinned
+     header keeps a constant height and the menu is never hidden behind it. */
   .admin-nav-open {
     display: flex;
+    position: absolute;
+    top: calc(100% - 6px);
+    left: 14px;
+    right: 14px;
+    z-index: 8;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 18px 40px #123b5524;
+    padding: 8px;
+    max-height: 70svh;
+    overflow-y: auto;
+  }
+
+  /* User/actions bar: pinned directly under the brand/menu row. */
+  .admin-topbar {
+    position: sticky;
+    top: var(--admin-head);
+    z-index: 6;
+    padding: 11px 15px;
   }
 
   .admin-grid-2 {
@@ -713,10 +756,6 @@ body {
 
   .admin-content {
     padding: 18px 15px 40px;
-  }
-
-  .admin-topbar {
-    padding: 11px 15px;
   }
 
   .admin-user-meta strong {

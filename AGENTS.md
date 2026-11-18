@@ -67,6 +67,8 @@ npm run test:integration:rls
 npm run test:integration:transactions
 npm run test:integration:sold
 npm run test:integration:inventory
+npm run test:integration:rpc-fallback
+npm run test:integration:headers   # needs `npm run build` first
 npm run test:integration:e2e     # needs `npm run build` first
 npm run test:integration:down
 ```
@@ -82,3 +84,8 @@ and can never touch a hosted project. `npm run lint` is broken repo-wide
 - Admin inputs are 14px on desktop but must be ≥16px on mobile (≤860px) so iOS
   Safari does not zoom on focus.
 - Do not add `maximumScale`/`user-scalable=no` to the viewport.
+- Headers are `position: sticky`. Sticky needs a scrolling ancestor, so never
+  put `overflow: hidden`/`auto`/`scroll` on `html`, `body` or the storefront
+  `.app-shell` — that makes the element a scroll container and silently stops
+  the headers from sticking. Use `overflow-x: clip` (it clips without creating a
+  scroll container; `hidden` stays first as a fallback for older Safari).

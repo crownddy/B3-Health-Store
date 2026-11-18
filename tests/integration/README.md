@@ -4,7 +4,7 @@ These suites exercise product management against a **real local Supabase stack**
 real GoTrue auth, real PostgREST requests, real Postgres RLS and real Storage.
 They are the layer that unit tests cannot cover.
 
-Six suites live here:
+Seven suites live here:
 
 | Suite | File | What it checks |
 |---|---|---|
@@ -13,6 +13,7 @@ Six suites live here:
 | Sold screen | `sold.suite.mjs` | The sellable-availability helpers list only sellable products with the right quantity, expired stock is excluded, and a sale deducts through the stock-out RPC (FEFO, atomic, authorized) |
 | Inventory query | `inventory.suite.mjs` | The pushed-down `list_inventory_products` / `list_inventory_batches` / `dashboard_metrics` functions: search, expiry filter, paging, exact totals and per-role authorization |
 | RPC fallback | `rpc-fallback.suite.mjs` | With the pushed-down functions absent (a database that has not had the migration applied), the admin pages still render instead of throwing a server-side exception |
+| Fixed headers | `headers.suite.mjs` | Every header stays at the top of the viewport while the page scrolls (storefront, detail and admin), the back button and hamburger stay usable, pinned bars do not overlap, and no page overflows horizontally |
 | Browser E2E | `e2e.suite.mjs` | The admin console UI end to end in a real browser, including the Sold screen |
 
 ## Safety: local only
@@ -61,13 +62,16 @@ npm run test:integration:inventory
 #    needs a production build, starts and stops the app itself)
 npm run test:integration:rpc-fallback
 
-# 8. Browser E2E suite (starts and stops the app itself)
+# 8. Fixed headers suite (needs a production build; starts and stops the app itself)
+npm run test:integration:headers
+
+# 9. Browser E2E suite (starts and stops the app itself)
 npm run build
 npm run test:integration:e2e
 ```
 
-`test:integration:e2e` and `test:integration:rpc-fallback` need a production
-build (`npm run build`) because they run `next start`.
+`test:integration:e2e`, `test:integration:headers` and `test:integration:rpc-fallback`
+need a production build (`npm run build`) because they run `next start`.
 
 ## What `setup` does
 
