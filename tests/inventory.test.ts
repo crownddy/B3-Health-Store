@@ -2,19 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   INVENTORY_PAGE_SIZE,
-  buildInventoryRows,
-  filterByExpiryStatus,
-  groupBatchesByProduct,
-  paginateInventory,
-  searchInventory,
-  type InventoryBatch,
-  type InventoryProduct
+  isExpiryStatus,
+  mapInventoryItems,
+  toInventoryPage,
+  type InventoryListItem
 } from "../src/lib/products/inventory.ts";
 import { pageCount, clampPage } from "../src/lib/products/pagination.ts";
 
-const TODAY = new Date("2026-06-15T09:00:00Z");
-
-function product(overrides: Partial<InventoryProduct> = {}): InventoryProduct {
+function item(overrides: Partial<InventoryListItem> = {}): InventoryListItem {
   return {
     id: "p1",
     name: "Vitamin C",
@@ -23,128 +18,81 @@ function product(overrides: Partial<InventoryProduct> = {}): InventoryProduct {
     quantity: 10,
     minimum_stock: 2,
     status: "active",
+    batch_count: 2,
+    expiry_status: "valid",
     ...overrides
   };
 }
 
-function batch(overrides: Partial<InventoryBatch> = {}): InventoryBatch {
-  return {
-    product_id: "p1",
-    expiration_date: "2027-01-01",
-    quantity_remaining: 10,
-    ...overrides
-  };
-}
-
-// --- buildInventoryRows ----------------------------------------------------
-test("buildInventoryRows attaches a batch count and expiry status", () => {
-  const rows = buildInventoryRows(
-    [product()],
-    [
-      batch({ expiration_date: "2027-01-01" }),
-      batch({ expiration_date: "2026-06-01" })
-    ],
-    TODAY
-  );
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].batchCount, 2);
-  assert.equal(rows[0].expiryStatus, "expired");
+// --- isExpiryStatus --------------------------------------------------------
+test("isExpiryStatus accepts the four statuses and rejects anything else", () => {
+  for (const status of ["expired", "expiring_soon", "valid", "no_date"]) {
+    assert.equal(isExpiryStatus(status), true);
+  }
+  assert.equal(isExpiryStatus("bogus"), false);
+  assert.equal(isExpiryStatus(undefined), false);
+  assert.equal(isExpiryStatus(null), false);
+  assert.equal(isExpiryStatus(3), false);
 });
 
-test("buildInventoryRows is no_date for a product with no batches", () => {
-  const rows = buildInventoryRows([product()], [], TODAY);
-  assert.equal(rows[0].batchCount, 0);
+// --- mapInventoryItems -----------------------------------------------------
+test("mapInventoryItems maps the RPC columns to the list shape", () => {
+  const rows = mapInventoryItems([
+    item({ id: "a", batch_count: 3, expiry_status: "expired" })
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "a");
+  assert.equal(rows[0].batchCount, 3);
+  assert.equal(rows[0].expiryStatus, "expired");
+  // The snake_case fields are not leaked into the rendered shape.
+  assert.equal("batch_count" in rows[0], false);
+});
+
+test("mapInventoryItems falls back to no_date for an unknown status", () => {
+  const rows = mapInventoryItems([item({ expiry_status: "???" })]);
   assert.equal(rows[0].expiryStatus, "no_date");
 });
 
-test("buildInventoryRows keeps batches with their own product", () => {
-  const rows = buildInventoryRows(
-    [product({ id: "a", name: "A" }), product({ id: "b", name: "B" })],
-    [
-      batch({ product_id: "a", expiration_date: "2026-06-01", quantity_remaining: 1 }),
-      batch({ product_id: "b", expiration_date: "2027-01-01", quantity_remaining: 1 })
-    ],
-    TODAY
-  );
-  const a = rows.find((r) => r.id === "a");
-  const b = rows.find((r) => r.id === "b");
-  assert.equal(a?.expiryStatus, "expired");
-  assert.equal(b?.expiryStatus, "valid");
+// --- toInventoryPage -------------------------------------------------------
+test("toInventoryPage reads the total, page and page count from the payload", () => {
+  const page = toInventoryPage({
+    items: [item({ id: "a" }), item({ id: "b" })],
+    total: 25,
+    page: 1,
+    pages: 3
+  });
+  assert.equal(page.items.length, 2);
+  assert.equal(page.total, 25);
+  assert.equal(page.page, 1);
+  assert.equal(page.pages, 3);
 });
 
-// --- grouping --------------------------------------------------------------
-test("groupBatchesByProduct groups by product id", () => {
-  const grouped = groupBatchesByProduct([
-    batch({ product_id: "a" }),
-    batch({ product_id: "a" }),
-    batch({ product_id: "b" })
-  ]);
-  assert.equal(grouped.get("a")?.length, 2);
-  assert.equal(grouped.get("b")?.length, 1);
-});
-
-// --- search ----------------------------------------------------------------
-test("searchInventory matches the product name, case-insensitively", () => {
-  const rows = [product({ id: "a", name: "Vitamin C" }), product({ id: "b", name: "Herbal Tea" })];
-  assert.deepEqual(
-    searchInventory(rows, "vit").map((r) => r.id),
-    ["a"]
-  );
-  assert.deepEqual(
-    searchInventory(rows, "  TEA ").map((r) => r.id),
-    ["b"]
-  );
-});
-
-test("searchInventory returns everything for a blank term", () => {
-  const rows = [product({ id: "a" }), product({ id: "b" })];
-  assert.equal(searchInventory(rows, "   ").length, 2);
-});
-
-// --- expiry filter ---------------------------------------------------------
-test("filterByExpiryStatus selects one status and keeps everything for all", () => {
-  const rows = [
-    { name: "a", expiryStatus: "expired" as const },
-    { name: "b", expiryStatus: "valid" as const },
-    { name: "c", expiryStatus: "expired" as const }
-  ];
-  assert.equal(filterByExpiryStatus(rows, "all").length, 3);
-  assert.deepEqual(
-    filterByExpiryStatus(rows, "expired").map((r) => r.name),
-    ["a", "c"]
-  );
-});
-
-// --- pagination ------------------------------------------------------------
-test("paginateInventory slices the requested page and clamps out-of-range pages", () => {
-  const rows = Array.from({ length: 25 }, (_, i) => ({ id: `p${i}` }));
-
-  const first = paginateInventory(rows, 0, 10);
-  assert.equal(first.items.length, 10);
-  assert.equal(first.total, 25);
-  assert.equal(first.pages, 3);
-  assert.equal(first.items[0].id, "p0");
-
-  const last = paginateInventory(rows, 2, 10);
-  assert.equal(last.items.length, 5);
-  assert.equal(last.items[0].id, "p20");
-
-  const clamped = paginateInventory(rows, 99, 10);
-  assert.equal(clamped.page, 2);
-});
-
-test("paginateInventory falls back to the first page for an empty result", () => {
-  const page = paginateInventory([], 4, 10);
-  assert.equal(page.items.length, 0);
+test("toInventoryPage tolerates a missing payload", () => {
+  const page = toInventoryPage(null);
+  assert.deepEqual(page.items, []);
+  assert.equal(page.total, 0);
   assert.equal(page.page, 0);
   assert.equal(page.pages, 1);
 });
 
+test("toInventoryPage clamps an out-of-range page and keeps pages at least one", () => {
+  const high = toInventoryPage({ items: [], total: 5, page: 99, pages: 1 });
+  assert.equal(high.page, 0);
+  const low = toInventoryPage({ items: [], total: 5, page: -4, pages: 2 });
+  assert.equal(low.page, 0);
+});
+
+test("toInventoryPage derives a sensible total when the payload omits it", () => {
+  const page = toInventoryPage({ items: [item(), item()] });
+  assert.equal(page.total, 2);
+  assert.equal(page.pages, 1);
+});
+
+// --- shared page arithmetic ------------------------------------------------
 test("the inventory page size is positive", () => {
   assert.ok(INVENTORY_PAGE_SIZE > 0);
 });
 
-// --- shared page arithmetic ------------------------------------------------
 test("pageCount is at least one and rounds up", () => {
   assert.equal(pageCount(0, 10), 1);
   assert.equal(pageCount(10, 10), 1);

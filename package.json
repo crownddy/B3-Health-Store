@@ -15,6 +15,7 @@
     "test:integration:rls": "node tests/integration/rls.suite.mjs",
     "test:integration:transactions": "node tests/integration/transactions.suite.mjs",
     "test:integration:sold": "node tests/integration/sold.suite.mjs",
+    "test:integration:inventory": "node tests/integration/inventory.suite.mjs",
     "test:integration:e2e": "node tests/integration/scripts/run-e2e.mjs"
   },
   "dependencies": {

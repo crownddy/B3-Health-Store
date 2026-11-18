@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
-import { getBatches, getDashboardMetrics, getProductReferenceCountsMany, getProducts } from "@/lib/data";
+import {
+  getDashboardMetrics,
+  getInventoryBatches,
+  getInventoryProducts,
+  getProductReferenceCountsMany
+} from "@/lib/data";
 import { SectionCard, EmptyState, StatusPill, StatCard } from "@/components/admin/ui";
 import BatchTable from "@/components/admin/BatchTable";
 import ExpiryFilter from "@/components/admin/ExpiryFilter";
@@ -8,17 +13,10 @@ import InventoryFilters from "@/components/admin/InventoryFilters";
 import InventoryDeleteButton from "@/components/admin/InventoryDeleteButton";
 import ProductThumb from "@/components/admin/ProductThumb";
 import { ExpiryStatusPill } from "@/components/admin/ExpiryPill";
-import { filterBatchesByExpiry, classifyExpiry, type ExpiryStatus } from "@/lib/products/batches";
-import {
-  buildInventoryRows,
-  filterByExpiryStatus,
-  paginateInventory,
-  searchInventory,
-  INVENTORY_PAGE_SIZE
-} from "@/lib/products/inventory";
+import type { ExpiryStatus } from "@/lib/products/batches";
+import { INVENTORY_PAGE_SIZE, toInventoryPage } from "@/lib/products/inventory";
 import { canDeleteProduct } from "@/lib/products/policy";
 import { stockStatus } from "@/lib/products/stock";
-import { relationName } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -53,49 +51,33 @@ export default async function AdminInventoryPage({
   const expiry = readExpiry(params.expiry);
   const requestedPage = readPage(params.page);
 
-  const [products, metrics, batches] = await Promise.all([
-    getProducts(),
+  const [metrics, inventory, batchPage] = await Promise.all([
     getDashboardMetrics(),
-    getBatches()
+    getInventoryProducts(search, expiry, requestedPage, INVENTORY_PAGE_SIZE),
+    getInventoryBatches(expiry)
   ]);
 
-  const rows = buildInventoryRows(
-    products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      category: product.category,
-      image_url: product.image_url,
-      quantity: product.quantity,
-      minimum_stock: product.minimum_stock,
-      status: product.status
-    })),
-    batches
-  );
-
-  // Server-side search + filter + paging: only the requested page of products is
-  // ever sent to the browser, never the whole catalogue.
-  const filtered = filterByExpiryStatus(searchInventory(rows, search), expiry);
-  const page = paginateInventory(filtered, requestedPage, INVENTORY_PAGE_SIZE);
+  // The database did the search, expiry filter and paging; this only maps the
+  // requested page into the rows the table renders.
+  const page = toInventoryPage(inventory);
+  // Distinguishes "nothing in the catalogue" from "nothing matches this filter".
+  const hasProducts = metrics.totalProducts > 0;
 
   // Reference counts are only fetched for the products actually shown.
   const references = isSuperAdmin
     ? await getProductReferenceCountsMany(page.items.map((row) => row.id))
     : new Map<string, { stockMovements: number; batches: number }>();
 
-  const batchRows = filterBatchesByExpiry(batches, expiry).map((batch) => ({
+  const batchRows = batchPage.items.map((batch) => ({
     id: batch.id,
     batch_number: batch.batch_number,
     expiration_date: batch.expiration_date,
     quantity_remaining: batch.quantity_remaining,
-    productName: relationName(batch.products)
+    productName: batch.product_name ?? undefined
   }));
 
-  const expiredCount = batches.filter(
-    (batch) => classifyExpiry(batch.expiration_date) === "expired"
-  ).length;
-  const expiringSoonCount = batches.filter(
-    (batch) => classifyExpiry(batch.expiration_date) === "expiring_soon"
-  ).length;
+  const expiredCount = batchPage.expired;
+  const expiringSoonCount = batchPage.expiringSoon;
 
   return (
     <>
@@ -141,7 +123,7 @@ export default async function AdminInventoryPage({
       >
         <InventoryFilters total={page.total} page={page.page} pages={page.pages} />
 
-        {rows.length === 0 ? (
+        {!hasProducts ? (
           <EmptyState title="No products to track" hint="Add products to see inventory levels." />
         ) : page.items.length === 0 ? (
           <EmptyState
@@ -218,7 +200,7 @@ export default async function AdminInventoryPage({
         description={`Every batch with its number, available quantity and expiry. ${expiredCount} expired · ${expiringSoonCount} expiring soon.`}
         actions={<ExpiryFilter basePath="/admin/inventory" />}
       >
-        {batches.length === 0 ? (
+        {batchPage.total === 0 ? (
           <EmptyState
             title="No batches recorded"
             hint="Receive stock with an expiration date to track batches here."

@@ -11,7 +11,12 @@ Mobile-first. TypeScript strict. No CSS framework — hand-written CSS in
   `requireAdmin()` (server gate) and renders the sidebar/topbar.
 - `src/components/admin/**` — admin UI (client components for interactivity).
 - `src/lib/data.ts` — every read the admin screens use. Uses the request-scoped
-  Supabase client, so Row Level Security applies to the signed-in user.
+  Supabase client, so Row Level Security applies to the signed-in user. The
+  Inventory list and the dashboard read through the RPCs
+  `list_inventory_products` / `dashboard_metrics`
+  (`20261119_inventory_query_pushdown.sql`) so search, expiry filtering, paging
+  and the totals are computed in the database — never load the whole catalogue
+  and filter in app code.
 - `src/lib/products/**` — pure, unit-testable helpers (expiry, stock, policy,
   validation, pagination). Server actions live next to their pages in
   `actions.ts` files.
@@ -56,6 +61,7 @@ npm run test:integration:setup   # start + seed local Supabase (Docker)
 npm run test:integration:rls
 npm run test:integration:transactions
 npm run test:integration:sold
+npm run test:integration:inventory
 npm run test:integration:e2e     # needs `npm run build` first
 npm run test:integration:down
 ```

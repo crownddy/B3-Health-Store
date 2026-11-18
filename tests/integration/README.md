@@ -52,7 +52,10 @@ npm run test:integration:transactions
 # 5. Sold screen suite
 npm run test:integration:sold
 
-# 6. Browser E2E suite (starts and stops the app itself)
+# 6. Inventory query suite (pushed-down search, filtering, paging, metrics)
+npm run test:integration:inventory
+
+# 7. Browser E2E suite (starts and stops the app itself)
 npm run build
 npm run test:integration:e2e
 ```

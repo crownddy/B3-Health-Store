@@ -1,5 +1,6 @@
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { ProductBatchSummary, ProductRecord } from "@/lib/products/types";
+import type { InventoryPagePayload } from "@/lib/products/inventory";
 import { EXPIRING_SOON_DAYS } from "@/lib/products/batches";
 
 /** Columns loaded for the admin catalogue. */
@@ -61,21 +62,6 @@ export type BatchWithProduct = {
   products: { name: string } | { name: string }[] | null;
 };
 
-export type ProductRow = {
-  id: string;
-  name: string;
-  category: string | null;
-  sku: string | null;
-  selling_price: number;
-  purchase_price: number;
-  quantity: number;
-  minimum_stock: number;
-  shelf_number: string | null;
-  is_visible_on_homepage: boolean;
-  is_featured: boolean;
-  created_at: string;
-};
-
 export type StaffRow = {
   id: string;
   full_name: string | null;
@@ -106,78 +92,93 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   if (!isSupabaseConfigured) return EMPTY_METRICS;
 
   const supabase = await createClient();
-
-  const [productsRes, categoriesRes, staffRes, movementsRes, batchesRes] = await Promise.all([
-    supabase
-      .from("products")
-      .select(
-        "id,name,category,sku,selling_price,purchase_price,quantity,minimum_stock,shelf_number,is_visible_on_homepage,is_featured,created_at"
-      ),
-    supabase.from("categories").select("id", { count: "exact", head: true }),
-    supabase.from("profiles").select("id", { count: "exact", head: true }),
-    supabase
-      .from("stock_movements")
-      .select("id,movement_type,quantity,note,created_at,products(name)")
-      .order("created_at", { ascending: false })
-      .limit(6),
-    supabase
-      .from("product_batches")
-      .select("id,batch_number,expiration_date,quantity_remaining,products(name)")
-      .not("expiration_date", "is", null)
-      .order("expiration_date", { ascending: true })
-  ]);
-
-  const firstError =
-    productsRes.error || categoriesRes.error || staffRes.error || movementsRes.error || batchesRes.error;
-  if (firstError) {
-    throw new Error(`Unable to load dashboard data: ${firstError.message}`);
-  }
-
-  const products = (productsRes.data ?? []) as ProductRow[];
-  const batches = (batchesRes.data ?? []) as ExpiringRow[];
-
-  const inventoryValue = products.reduce(
-    (sum, product) => sum + Number(product.selling_price ?? 0) * Number(product.quantity ?? 0),
-    0
-  );
-  const stockUnits = products.reduce((sum, product) => sum + Number(product.quantity ?? 0), 0);
-
-  const lowStock = products.filter(
-    (product) => Number(product.quantity) > 0 && Number(product.quantity) <= Number(product.minimum_stock)
-  );
-  const outOfStock = products.filter((product) => Number(product.quantity) <= 0);
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const horizon = new Date(today.getTime() + EXPIRING_SOON_DAYS * 86_400_000);
-
-  const expiring = batches.filter((batch) => {
-    if (!batch.expiration_date) return false;
-    const date = new Date(batch.expiration_date);
-    if (Number.isNaN(date.getTime())) return false;
-    return date >= today && date <= horizon;
+  // The figures are computed in the database, so the dashboard no longer loads
+  // the whole catalogue and every dated batch to derive them.
+  const { data, error } = await supabase.rpc("dashboard_metrics", {
+    p_soon_days: EXPIRING_SOON_DAYS
   });
-  const expired = batches.filter((batch) => {
-    if (!batch.expiration_date) return false;
-    const date = new Date(batch.expiration_date);
-    if (Number.isNaN(date.getTime())) return false;
-    return date < today;
-  });
+  if (error) throw new Error(`Unable to load dashboard data: ${error.message}`);
 
+  const payload = (data ?? {}) as Partial<DashboardMetrics>;
+  return { ...EMPTY_METRICS, ...payload };
+}
+
+/**
+ * One page of the Inventory product list.
+ *
+ * Search, expiration filtering and pagination all run in PostgreSQL
+ * (`list_inventory_products`), so only the requested page of products — and only
+ * their batch count and aggregate expiration status — crosses the wire. The
+ * payload carries the exact total, so the pager stays correct while filtering.
+ * Row Level Security still decides what the caller can read.
+ */
+export async function getInventoryProducts(
+  search: string,
+  expiry: string,
+  page: number,
+  pageSize: number
+): Promise<InventoryPagePayload> {
+  if (!isSupabaseConfigured) return { items: [], total: 0, page: 0, pages: 1 };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("list_inventory_products", {
+    p_search: search || null,
+    p_expiry: expiry === "all" ? null : expiry,
+    p_page: Math.max(0, page),
+    p_page_size: pageSize,
+    p_soon_days: EXPIRING_SOON_DAYS
+  });
+  if (error) throw new Error(`Unable to load inventory: ${error.message}`);
+  return (data ?? {}) as InventoryPagePayload;
+}
+
+/** A batch row for the Inventory "Batches & expiry" section. */
+export type InventoryBatchRow = {
+  id: string;
+  batch_number: string | null;
+  expiration_date: string | null;
+  quantity_remaining: number;
+  product_name: string | null;
+};
+
+export type InventoryBatchPage = {
+  items: InventoryBatchRow[];
+  total: number;
+  expired: number;
+  expiringSoon: number;
+};
+
+/** The raw payload `list_inventory_batches` returns. */
+export type InventoryBatchPayload = {
+  items?: InventoryBatchRow[];
+  total?: number;
+  expired?: number;
+  expiring_soon?: number;
+};
+
+/**
+ * A bounded page of batches for the Inventory screen, most urgent expiry first,
+ * with the exact expired / expiring-soon counts. Only the requested slice is
+ * loaded, so a large batch history never has to be shipped to render a few rows.
+ */
+export async function getInventoryBatches(
+  expiry: string,
+  limit = 50
+): Promise<InventoryBatchPage> {
+  if (!isSupabaseConfigured) return { items: [], total: 0, expired: 0, expiringSoon: 0 };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("list_inventory_batches", {
+    p_expiry: expiry === "all" ? null : expiry,
+    p_limit: limit,
+    p_offset: 0,
+    p_soon_days: EXPIRING_SOON_DAYS
+  });
+  if (error) throw new Error(`Unable to load batches: ${error.message}`);
+  const payload = (data ?? {}) as InventoryBatchPayload;
   return {
-    totalProducts: products.length,
-    visibleProducts: products.filter((product) => product.is_visible_on_homepage).length,
-    totalCategories: categoriesRes.count ?? 0,
-    totalStaff: staffRes.count ?? 0,
-    inventoryValue,
-    stockUnits,
-    lowStockCount: lowStock.length,
-    outOfStockCount: outOfStock.length,
-    expiringSoonCount: expiring.length,
-    expiredCount: expired.length,
-    recentMovements: (movementsRes.data ?? []) as MovementRow[],
-    lowStockProducts: lowStock.slice(0, 5),
-    expiringBatches: expiring.slice(0, 5)
+    items: payload.items ?? [],
+    total: Number(payload.total ?? 0),
+    expired: Number(payload.expired ?? 0),
+    expiringSoon: Number(payload.expiring_soon ?? 0)
   };
 }
 
