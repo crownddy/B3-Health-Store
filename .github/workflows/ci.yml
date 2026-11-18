@@ -82,6 +82,9 @@ jobs:
       - name: Run RPC fallback suite (missing-migration regression)
         run: npm run test:integration:rpc-fallback
 
+      - name: Run fixed headers suite
+        run: npm run test:integration:headers
+
       - name: Run browser E2E suite
         run: npm run test:integration:e2e
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type NavItem = {
   href: string;
@@ -26,6 +26,23 @@ const ITEMS: NavItem[] = [
 export default function AdminNav({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+
+  // The mobile layout pins this row (brand + hamburger) to the top and the user
+  // bar directly beneath it. The row's height varies with text wrapping and the
+  // iPhone safe-area inset, so measure it and expose it as `--admin-head`
+  // instead of hard-coding a value. The open menu is positioned absolutely, so
+  // it does not change the measured height.
+  useEffect(() => {
+    const sidebar = toggleRef.current?.closest<HTMLElement>(".admin-sidebar");
+    const shell = toggleRef.current?.closest<HTMLElement>(".admin-shell");
+    if (!sidebar || !shell) return;
+    const sync = () => shell.style.setProperty("--admin-head", `${sidebar.offsetHeight}px`);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(sidebar);
+    return () => observer.disconnect();
+  }, []);
 
   const visible = ITEMS.filter((item) => !item.superAdminOnly || isSuperAdmin);
 
@@ -35,6 +52,7 @@ export default function AdminNav({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   return (
     <>
       <button
+        ref={toggleRef}
         type="button"
         className="admin-nav-toggle"
         onClick={() => setOpen((value) => !value)}
